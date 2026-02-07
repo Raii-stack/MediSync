@@ -1,0 +1,84 @@
+/* ============================================================================
+   MEDISYNC KIOSK STYLES
+   ============================================================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Arial', sans-serif;
+  background-color: #f0f4f8; /* Light medical blue */
+  overflow: hidden; /* Hide scrollbars for kiosk feel */
+  user-select: none; /* Prevent highlighting text */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+.kiosk-container {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.kiosk-wrapper {
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+}
+
+.symptoms-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 15px;
+  width: 80%;
+  max-width: 800px;
+}
+
+@media (min-width: 1100px) {
+  .symptoms-grid {
+    grid-template-columns: repeat(4, minmax(180px, 1fr));
+  }
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.3s ease;
+}
+
+button:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
+
+button:active {
+  transform: scale(0.98);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+button:disabled:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+h1, h2, h3 {
+  color: #2c3e50;
+  margin: 10px 0;
+}
+
+input[type="range"] {
+  cursor: pointer;
+}

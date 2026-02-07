@@ -70,6 +70,20 @@ app.post('/api/dispense', (req, res) => {
   });
 });
 
+// POST: Start Sensor Scan
+app.post('/api/scan/start', (req, res) => {
+  console.log('🟢 START_SCAN received');
+  hardware.startScan();
+  res.json({ success: true, message: 'Scan started' });
+});
+
+// POST: Stop Sensor Scan
+app.post('/api/scan/stop', (req, res) => {
+  console.log('🟠 STOP_SCAN received');
+  hardware.stopScan();
+  res.json({ success: true, message: 'Scan stopped' });
+});
+
 // POST: Emergency Alert
 app.post('/api/emergency', (req, res) => {
   const { room_number } = req.body;
