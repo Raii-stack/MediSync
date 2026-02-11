@@ -1,11 +1,28 @@
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { getBackendUrl } from '../lib/socket';
 
 export default function Home() {
   const navigate = useNavigate();
 
-  const simulateTap = () => {
+  const simulateTap = async () => {
     console.log("💳 RFID Tapped!");
-    navigate('/vitals');
+    
+    try {
+      // Simulate ID "123456" (Ryan Dela Cruz)
+      const res = await axios.post(`${getBackendUrl()}/api/login`, { 
+        student_id: "123456" 
+      });
+      
+      if (res.data.success) {
+        console.log("✅ Login successful:", res.data.student);
+        // Pass student info to the next page
+        navigate('/vitals', { state: { student: res.data.student } });
+      }
+    } catch (err) {
+      console.error("❌ Login Error:", err);
+      alert("Login Error: Is Backend running?");
+    }
   };
 
   return (

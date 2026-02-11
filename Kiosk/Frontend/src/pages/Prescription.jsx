@@ -58,16 +58,24 @@ export default function Prescription() {
     try {
       const res = await axios.post(`${getBackendUrl()}/api/dispense`, {
         medicine: med,
-        student_id: 'SIMULATED-ID',
+        student_id: state.student?.student_id || 'ANON',
+        student_name: state.student ? `${state.student.first_name} ${state.student.last_name}` : 'Unknown',
         symptoms: state.symptoms,
-        pain_level: state.pain
+        pain_level: state.pain,
+        vitals: state.vitals || { temp: '--', bpm: '--' }
       });
       
       console.log('✅ Dispense successful:', res.data);
-      alert(res.data.message || `✅ ${med} dispensed successfully!`);
       
-      // Return to home after 2 seconds
-      setTimeout(() => navigate('/'), 2000);
+      // Navigate to receipt page with all the data
+      navigate('/receipt', { 
+        state: {
+          student: state.student,
+          medicine: med,
+          vitals: state.vitals,
+          timestamp: res.data.timestamp
+        } 
+      });
     } catch (err) {
       console.error('❌ Dispense error:', err);
       const errorMsg = err.response?.data?.message || 'Server Offline or Medicine Out of Stock';

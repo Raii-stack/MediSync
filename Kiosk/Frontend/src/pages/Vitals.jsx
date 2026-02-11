@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { socket, getBackendUrl } from '../lib/socket';
 
 export default function Vitals() {
+  const { state } = useLocation(); // Get student data passed from Home
+  const student = state?.student || { first_name: "Guest" };
   const [vitals, setVitals] = useState({ temp: '--', bpm: '--' });
   const [remainingSeconds, setRemainingSeconds] = useState(30);
   const [isFinalized, setIsFinalized] = useState(false);
@@ -77,7 +79,10 @@ export default function Vitals() {
             console.error('Failed to stop scan:', err);
           });
 
-          setTimeout(() => navigate('/triage'), 800);
+          // Pass both student and vitals to next page
+          setTimeout(() => navigate('/triage', { 
+            state: { student, vitals: { temp: avgTemp, bpm: avgBpm } } 
+          }), 800);
         }, 30000);
       }
 
@@ -103,6 +108,18 @@ export default function Vitals() {
 
   return (
     <div className="kiosk-container">
+      {/* GREETING HEADER */}
+      <div style={{ 
+        position: 'absolute', 
+        top: '20px', 
+        left: '20px', 
+        fontSize: '24px', 
+        fontWeight: 'bold', 
+        color: '#2c3e50' 
+      }}>
+        Hello, {student.first_name} 👋
+      </div>
+
       <h2 style={{ fontSize: '36px', marginBottom: '10px' }}>Vital Signs Check</h2>
       <p style={{ fontSize: '16px', color: '#7f8c8d', marginBottom: '40px' }}>
         {isFinalized

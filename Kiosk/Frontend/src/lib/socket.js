@@ -46,11 +46,15 @@ export function getSocket() {
     const url = getBackendUrl();
     console.log('[getSocket] Creating socket with URL:', url);
     socketInstance = io(url, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'], // Try polling first in Codespaces
       autoConnect: true,
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionAttempts: 10
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: 10,
+      timeout: 20000,
+      forceNew: false,
+      upgrade: true // Allow upgrading to websocket after polling connects
     });
 
     socketInstance.on('connect', () => {

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 const SYMPTOMS_LIST = [
   { id: 'fever', label: 'Fever', icon: '🤒' },
@@ -13,6 +13,7 @@ const SYMPTOMS_LIST = [
 ];
 
 export default function Triage() {
+  const { state } = useLocation(); // Get student & vitals from previous page
   const navigate = useNavigate();
   const [pain, setPain] = useState(5);
   const [selectedSymptoms, setSelected] = useState([]);
@@ -30,7 +31,15 @@ export default function Triage() {
       alert("Please select at least one symptom.");
       return;
     }
-    navigate('/prescription', { state: { symptoms: selectedSymptoms, pain } });
+    // Pass student, vitals, symptoms, and pain to prescription page
+    navigate('/prescription', { 
+      state: { 
+        student: state?.student,
+        vitals: state?.vitals,
+        symptoms: selectedSymptoms, 
+        pain 
+      } 
+    });
   };
 
   const getPainEmoji = () => {

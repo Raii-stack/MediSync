@@ -26,8 +26,8 @@ services:
           target: /app
           ignore:
             - node_modules/
-            - medisync.db
-            - medisync.db-journal
+            - kiosk.db
+            - kiosk.db-journal
         # Restart on package.json changes
         - action: rebuild
           path: ./Kiosk/Backend/package.json
