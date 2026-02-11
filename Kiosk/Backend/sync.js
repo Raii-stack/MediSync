@@ -345,7 +345,8 @@ async function pushEmergencyAlerts() {
 }
 
 // ============================================================================
-// STEP D: Sync Current Inventory Levels (Now using kiosk_slots)
+// STEP D: Sync Inventory — ONE-WAY: Local (SQLite) → Cloud (Supabase)
+// The Kiosk is the Source of Truth for stock levels.
 // ============================================================================
 async function syncInventory() {
   return new Promise((resolve, reject) => {
@@ -367,37 +368,32 @@ async function syncInventory() {
         return resolve();
       }
 
-      console.log(`[SYNC-D] 📦 Syncing ${rows.length} slot(s) inventory...`);
+      console.log(`[SYNC-D] 📦 Pushing ${rows.length} slot(s) to cloud (Local → Cloud)...`);
 
       try {
-        // For each slot, insert/update into Supabase kiosk_inventory
-        for (const slot of rows) {
-          // First, delete existing record if it exists (to avoid conflicts)
-          await supabase
-            .from('kiosk_inventory')
-            .delete()
-            .eq('kiosk_id', KIOSK_ID)
-            .eq('medicine_name', slot.medicine_name);
+        // Build payload from local data — exact values, no defaults
+        const payload = rows.map(slot => ({
+          kiosk_id: KIOSK_ID,
+          slot_id: slot.slot_id,
+          medicine_name: slot.medicine_name,
+          current_stock: slot.current_stock,
+          last_synced: new Date().toISOString()
+        }));
 
-          // Then insert the updated record
-          const { error } = await supabase
-            .from('kiosk_inventory')
-            .insert({
-              kiosk_id: KIOSK_ID,
-              medicine_name: slot.medicine_name,
-              current_stock: slot.current_stock,
-              slot_id: slot.slot_id,
-              last_synced: new Date().toISOString()
-            });
+        // Upsert all slots in one call using composite key
+        const { error } = await supabase
+          .from('kiosk_inventory')
+          .upsert(payload, { onConflict: 'kiosk_id, slot_id' });
 
-          if (error) {
-            console.error(`[SYNC-D] Failed to sync Slot ${slot.slot_id} (${slot.medicine_name}):`, error.message);
-          } else {
+        if (error) {
+          console.error('[SYNC-D] Supabase upsert error:', error.message);
+        } else {
+          rows.forEach(slot => {
             console.log(`[SYNC-D] ✅ Synced Slot ${slot.slot_id}: ${slot.medicine_name} (Stock: ${slot.current_stock})`);
-          }
+          });
         }
 
-        // Mark kiosk_logs and slots as synced
+        // Mark slots as synced locally
         db.run(
           "UPDATE kiosk_slots SET synced = 1 WHERE synced = 0",
           (err) => {

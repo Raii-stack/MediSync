@@ -14,5 +14,13 @@ export default defineConfig({
     hmr: {
       clientPort: 5173, // Hot Module Replacement port
     },
+    // Proxy API calls to the backend service
+    proxy: {
+      '/api': {
+        target: 'http://medisync-backend:3001',
+        changeOrigin: true,
+        rewrite: (path) => path, // Keep the path as-is
+      },
+    },
   },
 })

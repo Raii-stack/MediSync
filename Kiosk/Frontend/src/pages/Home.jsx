@@ -1,9 +1,36 @@
 import { useNavigate } from 'react-router-dom';
+import { useState, useRef } from 'react';
 import axios from 'axios';
 import { getBackendUrl } from '../lib/socket';
 
 export default function Home() {
   const navigate = useNavigate();
+  const [adminClickCount, setAdminClickCount] = useState(0);
+  const adminTimeoutRef = useRef(null);
+
+  const handleLogoClick = () => {
+    // Clear previous timeout
+    if (adminTimeoutRef.current) {
+      clearTimeout(adminTimeoutRef.current);
+    }
+
+    // Increment counter
+    const newCount = adminClickCount + 1;
+    setAdminClickCount(newCount);
+
+    // If 5 clicks, navigate to admin
+    if (newCount >= 5) {
+      console.log('🔐 Admin panel unlocked!');
+      setAdminClickCount(0);
+      navigate('/admin');
+      return;
+    }
+
+    // Reset counter after 1.5 seconds of inactivity
+    adminTimeoutRef.current = setTimeout(() => {
+      setAdminClickCount(0);
+    }, 1500);
+  };
 
   const simulateTap = async () => {
     console.log("💳 RFID Tapped!");
@@ -29,6 +56,7 @@ export default function Home() {
     <div className="kiosk-container" style={{ textAlign: 'center' }}>
       <div style={{ marginBottom: '40px' }}>
         <div 
+          onClick={handleLogoClick}
           style={{ 
             width: '200px', 
             height: '200px', 
@@ -38,8 +66,12 @@ export default function Home() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '80px'
+            fontSize: '80px',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            transform: adminClickCount > 0 ? 'scale(0.97)' : 'scale(1)'
           }}
+          title="MediSync"
         >
           🏥
         </div>

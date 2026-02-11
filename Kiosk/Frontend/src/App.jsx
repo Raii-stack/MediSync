@@ -6,6 +6,7 @@ import Vitals from './pages/Vitals';
 import Triage from './pages/Triage';
 import Prescription from './pages/Prescription';
 import Receipt from './pages/Receipt';
+import AdminConfig from './pages/AdminConfig';
 import { socket } from './lib/socket';
 
 const IDLE_TIMEOUT_MS = 60000;
@@ -86,6 +87,7 @@ export default function App() {
           <Route path="/triage" element={<Triage />} />
           <Route path="/prescription" element={<Prescription />} />
           <Route path="/receipt" element={<Receipt />} />
+          <Route path="/admin" element={<AdminConfig />} />
         </Routes>
       </Layout>
     </Router>

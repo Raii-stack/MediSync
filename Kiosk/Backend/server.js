@@ -136,35 +136,61 @@ app.get('/api/admin/slots', (req, res) => {
 
 // --- ADMIN API: Update slot assignment ---
 app.post('/api/admin/slots', (req, res) => {
-  const { slot_id, medicine_name, current_stock } = req.body;
+  const { slot_id, medicine_name, current_stock, stock } = req.body;
   
   if (!slot_id || !medicine_name) {
     return res.status(400).json({ error: "slot_id and medicine_name required" });
   }
+
+  // Accept stock from either "stock" or "current_stock" field
+  const providedStock = stock !== undefined ? stock : current_stock;
   
   // Verify medicine exists
   db.get("SELECT id FROM medicines_library WHERE name = ?", [medicine_name], (err, row) => {
     if (err || !row) {
       return res.status(400).json({ error: `Medicine '${medicine_name}' not found` });
     }
-    
-    // Update slot
-    db.run(
-      "UPDATE kiosk_slots SET medicine_name = ?, current_stock = ?, synced = 0 WHERE slot_id = ?",
-      [medicine_name, current_stock || 0, slot_id],
-      function(err) {
-        if (err) {
-          console.error('Error updating slot:', err.message);
-          return res.status(500).json({ error: err.message });
-        }
-        
-        console.log(`✅ Updated Slot ${slot_id} to ${medicine_name}`);
-        res.json({ 
-          success: true, 
-          message: `Slot ${slot_id} updated to ${medicine_name}` 
-        });
+
+    // If stock was provided, validate and use it; otherwise keep existing stock
+    if (providedStock !== undefined && providedStock !== null) {
+      const stockNum = parseInt(providedStock, 10);
+      if (isNaN(stockNum) || stockNum < 0) {
+        return res.status(400).json({ error: "current_stock must be a valid integer >= 0" });
       }
-    );
+
+      db.run(
+        "UPDATE kiosk_slots SET medicine_name = ?, current_stock = ?, synced = 0 WHERE slot_id = ?",
+        [medicine_name, stockNum, slot_id],
+        function(err) {
+          if (err) {
+            console.error('Error updating slot:', err.message);
+            return res.status(500).json({ error: err.message });
+          }
+          console.log(`✅ Updated Slot ${slot_id} to ${medicine_name} (Stock: ${stockNum})`);
+          res.json({ 
+            success: true, 
+            message: `Slot ${slot_id} updated to ${medicine_name} (Stock: ${stockNum})` 
+          });
+        }
+      );
+    } else {
+      // No stock provided — update medicine only, keep existing stock
+      db.run(
+        "UPDATE kiosk_slots SET medicine_name = ?, synced = 0 WHERE slot_id = ?",
+        [medicine_name, slot_id],
+        function(err) {
+          if (err) {
+            console.error('Error updating slot:', err.message);
+            return res.status(500).json({ error: err.message });
+          }
+          console.log(`✅ Updated Slot ${slot_id} to ${medicine_name} (Stock: unchanged)`);
+          res.json({ 
+            success: true, 
+            message: `Slot ${slot_id} updated to ${medicine_name}` 
+          });
+        }
+      );
+    }
   });
 });
 
