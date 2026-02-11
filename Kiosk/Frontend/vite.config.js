@@ -10,9 +10,12 @@ export default defineConfig({
     strictPort: true,
     watch: {
       usePolling: true, // Enable polling for Docker environments
+      interval: 100,
     },
     hmr: {
-      clientPort: 5173, // Hot Module Replacement port
+      host: 'localhost',
+      port: 5173,
+      protocol: 'ws',
     },
     // Proxy API calls to the backend service
     proxy: {

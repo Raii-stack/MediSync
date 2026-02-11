@@ -118,10 +118,11 @@ app.get('/api/admin/slots', (req, res) => {
       ks.slot_id, 
       ks.medicine_name, 
       ks.current_stock,
-      ks.max_stock,
+      ks.max_stock as max_capacity,
       ks.last_restocked,
       ml.description,
-      ml.symptoms_target
+      ml.symptoms_target,
+      ml.image_url
     FROM kiosk_slots ks
     LEFT JOIN medicines_library ml ON ks.medicine_name = ml.name
     ORDER BY ks.slot_id

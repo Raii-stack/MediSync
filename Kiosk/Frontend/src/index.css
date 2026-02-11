@@ -2,6 +2,8 @@
    MEDISYNC KIOSK STYLES
    ============================================================================ */
 
+@import "tailwindcss";
+
 * {
   margin: 0;
   padding: 0;
@@ -81,4 +83,26 @@ h1, h2, h3 {
 
 input[type="range"] {
   cursor: pointer;
+}
+
+
+/* ============================================================================
+   ADMIN DASHBOARD STYLES
+   ============================================================================ */
+
+.slot-card-image {
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.15));
+  transition: transform 0.3s ease;
+}
+
+.slot-card:hover .slot-card-image {
+  transform: scale(1.08);
+}
+
+.slot-card {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.slot-card:hover {
+  transform: translateY(-4px);
 }

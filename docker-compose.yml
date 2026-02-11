@@ -8,11 +8,8 @@ services:
     ports:
       - "3001:3001"
     volumes:
-      # Mount source code for live reloading
       - ./Kiosk/Backend:/app
-      # Exclude node_modules to use container's version
       - /app/node_modules
-      # Persist SQLite database
       - backend-db:/app
     environment:
       - NODE_ENV=development
@@ -20,7 +17,6 @@ services:
       - medisync-network
     develop:
       watch:
-        # Sync changes for JavaScript files
         - action: sync
           path: ./Kiosk/Backend
           target: /app
@@ -28,7 +24,6 @@ services:
             - node_modules/
             - kiosk.db
             - kiosk.db-journal
-        # Restart on package.json changes
         - action: rebuild
           path: ./Kiosk/Backend/package.json
 
@@ -41,25 +36,25 @@ services:
     ports:
       - "5173:5173"
     volumes:
-      # Mount source code for live reloading
       - ./Kiosk/Frontend:/app
-      # Exclude node_modules to use container's version
       - /app/node_modules
-    # Don't set VITE_API_BASE here - let it auto-detect at runtime
+      - /app/dist
     networks:
       - medisync-network
     depends_on:
       - backend
+    environment:
+      - VITE_API_URL=http://localhost:3001
     develop:
       watch:
-        # Sync changes for all source files (Vite handles HMR)
         - action: sync
           path: ./Kiosk/Frontend
           target: /app
           ignore:
             - node_modules/
             - dist/
-        # Rebuild on package.json changes
+            - .git/
+            - .env
         - action: rebuild
           path: ./Kiosk/Frontend/package.json
 
