@@ -7,18 +7,177 @@ const hardware = require('./serial');
 
 // Initialize App
 const app = express();
-app.use(cors()); // Allow Frontend to access this
+
+// CORS Configuration - Allow all origins for development
+const corsOptions = {
+  origin: function (origin, callback) {
+    callback(null, true); // Allow all origins
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false,
+  optionsSuccessStatus: 200,
+  preflightContinue: false
+};
+
+app.use(cors(corsOptions));
+
 app.use(express.json());
 
 const server = http.createServer(app);
 const io = new Server(server, { 
-  cors: { origin: "*" } // Allow any connection (for dev)
+  cors: { 
+    origin: "*",
+    methods: ["GET", "POST"],
+    credentials: false
+  },
+  transports: ['websocket', 'polling'],
+  allowEIO3: true,
+  pingTimeout: 30000,
+  pingInterval: 10000,
+  upgradeTimeout: 10000,
+  maxHttpBufferSize: 1e6,
+  allowUpgrades: true,
+  perMessageDeflate: false,
+  httpCompression: false,
+  connectTimeout: 45000
+});
+
+const activeSessionSockets = new Map();
+
+// Vitals tracking for calculating averages
+let vitalsSession = {
+  isScanning: false,
+  bpmSamples: [],
+  tempSamples: [],
+  sampleCount: 0,
+  lastEmitTime: 0
+};
+
+function resetVitalsSession() {
+  vitalsSession = {
+    isScanning: false,
+    bpmSamples: [],
+    tempSamples: [],
+    sampleCount: 0,
+    lastEmitTime: 0
+  };
+}
+
+function completeVitalsSession() {
+  if (vitalsSession.bpmSamples.length === 0 || vitalsSession.tempSamples.length === 0) {
+    console.log('[VITALS] No samples collected, not emitting completion event');
+    resetVitalsSession();
+    return;
+  }
+
+  const avgBpm = vitalsSession.bpmSamples.reduce((a, b) => a + b, 0) / vitalsSession.bpmSamples.length;
+  const avgTemp = vitalsSession.tempSamples.reduce((a, b) => a + b, 0) / vitalsSession.tempSamples.length;
+
+  console.log(`[VITALS] ✅ Scan complete - Avg BPM: ${avgBpm.toFixed(1)}, Avg Temp: ${avgTemp.toFixed(1)}`);
+  
+  io.emit('vitals-complete', {
+    avg_bpm: parseFloat(avgBpm.toFixed(1)),
+    temp: parseFloat(avgTemp.toFixed(1))
+  });
+
+  resetVitalsSession();
+}
+
+// Socket.IO connection handler
+io.on('connection', (socket) => {
+  const sessionId = socket.handshake.auth?.sessionId;
+
+  if (sessionId) {
+    const existingSocketId = activeSessionSockets.get(sessionId);
+    if (existingSocketId && existingSocketId !== socket.id) {
+      console.log(`♻️ Replacing duplicate client for session ${sessionId}`);
+      const existingSocket = io.sockets.sockets.get(existingSocketId);
+      if (existingSocket) {
+        existingSocket.disconnect(true);
+      }
+    }
+    activeSessionSockets.set(sessionId, socket.id);
+  }
+
+  console.log(`✅ Client connected: ${socket.id}${sessionId ? ` (session ${sessionId})` : ''}`);
+  
+  socket.on('disconnect', (reason) => {
+    if (sessionId && activeSessionSockets.get(sessionId) === socket.id) {
+      activeSessionSockets.delete(sessionId);
+    }
+    console.log(`❌ Client disconnected: ${socket.id} - ${reason}`);
+  });
 });
 
 // --- 1. HARDWARE STREAMING ---
 // When we get data (real or simulated), send it to the Frontend
-hardware.onData((data) => {
-  io.emit('vitals-update', data);
+console.log('[DEBUG] Setting up hardware.onData callback...');
+hardware.onData((event) => {
+  if (!event) return;
+
+  if (event.type === 'login') {
+    const uid = event.uid;
+    if (!uid) return;
+
+    db.get(
+      'SELECT * FROM students_cache WHERE rfid_uid = ?',
+      [uid],
+      (err, row) => {
+        if (err) {
+          console.error('RFID lookup error:', err.message);
+          io.emit('rfid-scan', { student: null, uid });
+          return;
+        }
+        io.emit('rfid-scan', { student: row || null, uid });
+      }
+    );
+    return;
+  }
+
+  if (event.type === 'vitals') {
+    console.log('[DEBUG] hardware vitals event:', event.data);
+    console.log('[DEBUG] Connected clients count:', io.engine.clientsCount);
+    
+    // Track samples for averaging
+    const bpmValue = parseFloat(event.data.bpm);
+    const tempValue = parseFloat(event.data.temp);
+    
+    if (!isNaN(bpmValue)) {
+      vitalsSession.bpmSamples.push(bpmValue);
+    }
+    if (!isNaN(tempValue)) {
+      vitalsSession.tempSamples.push(tempValue);
+    }
+    vitalsSession.sampleCount++;
+    vitalsSession.isScanning = true;
+    
+    // Emit as vitals-progress for realtime updates
+    const progress = Math.min(10, vitalsSession.sampleCount / 5);
+    io.emit('vitals-progress', {
+      bpm: bpmValue,
+      temp: tempValue,
+      progress: progress
+    });
+    
+    // Auto-complete after collecting enough samples (around 35 seconds worth)
+    // Simulation generates every 2 seconds, so ~17 samples
+    if (vitalsSession.sampleCount >= 17) {
+      console.log('[VITALS] Auto-completing scan after collecting sufficient samples');
+      hardware.stopScan();
+      completeVitalsSession();
+    }
+    
+    return;
+  }
+});
+
+// Register callback for when hardware auto-stops the scan
+hardware.onStop(() => {
+  console.log('[VITALS] Hardware auto-stop triggered, completing session');
+  if (vitalsSession.isScanning) {
+    completeVitalsSession();
+  }
 });
 
 // --- 2. API ENDPOINTS ---
@@ -269,6 +428,8 @@ app.post('/api/dispense', (req, res) => {
 // POST: Start Sensor Scan
 app.post('/api/scan/start', (req, res) => {
   console.log('🟢 START_SCAN received');
+  resetVitalsSession();
+  vitalsSession.isScanning = true;
   hardware.startScan();
   res.json({ success: true, message: 'Scan started' });
 });
@@ -277,6 +438,12 @@ app.post('/api/scan/start', (req, res) => {
 app.post('/api/scan/stop', (req, res) => {
   console.log('🟠 STOP_SCAN received');
   hardware.stopScan();
+  
+  // Complete the vitals session with averaged data
+  if (vitalsSession.isScanning) {
+    completeVitalsSession();
+  }
+  
   res.json({ success: true, message: 'Scan stopped' });
 });
 
@@ -290,8 +457,111 @@ app.post('/api/emergency', (req, res) => {
   res.json({ success: true, message: "Clinic Notified" });
 });
 
+// ========== DEBUG ENDPOINTS ==========
+// These endpoints are for testing Socket.IO without hardware
+
+// POST: Debug - Simulate RFID Tap
+app.post('/api/debug/rfid', (req, res) => {
+  // Explicitly set CORS headers
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  
+  const { rfid_uid } = req.body;
+  const uid = rfid_uid || `TEST_RFID_${Date.now()}`;
+  
+  console.log(`\n\n🔴 [DEBUG] Simulating RFID tap: ${uid}`);
+  
+  // Trigger RFID lookup
+  db.get(
+    'SELECT * FROM students_cache WHERE rfid_uid = ?',
+    [uid],
+    (err, row) => {
+      if (err) {
+        console.error('RFID lookup error:', err.message);
+        io.emit('rfid-scan', { student: null, uid, debug: true });
+        return;
+      }
+      io.emit('rfid-scan', { student: row || null, uid, debug: true });
+      console.log(`✅ [DEBUG] RFID scan emitted for ${uid}`);
+    }
+  );
+  
+  res.json({ success: true, message: `Simulating RFID: ${uid}` });
+});
+
+// POST: Debug - Simulate Vitals Data
+app.post('/api/debug/vitals', (req, res) => {
+  // Explicitly set CORS headers
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  
+  const { bpm, temp, duration } = req.body;
+  const simulatedBpm = bpm || 75;
+  const simulatedTemp = temp || 37.0;
+  const simulationDuration = duration || 5; // seconds
+  
+  console.log(`\n\n🔴 [DEBUG] Simulating vitals data for ${simulationDuration}s`);
+  console.log(`  BPM: ${simulatedBpm}, Temp: ${simulatedTemp}°C`);
+  
+  let sampleCount = 0;
+  const interval = setInterval(() => {
+    sampleCount++;
+    const progress = Math.min(10, sampleCount / 2);
+    
+    // Add some variance
+    const varyBpm = simulatedBpm + (Math.random() - 0.5) * 10;
+    const varyTemp = parseFloat(simulatedTemp) + (Math.random() - 0.5) * 0.5;
+    
+    console.log(`[DEBUG] Sample ${sampleCount}: BPM=${varyBpm.toFixed(1)}, Temp=${varyTemp.toFixed(1)}, Progress=${progress.toFixed(1)}`);
+    
+    io.emit('vitals-progress', {
+      bpm: parseFloat(varyBpm.toFixed(1)),
+      temp: parseFloat(varyTemp.toFixed(1)),
+      progress: parseFloat(progress.toFixed(1)),
+      sample_count: sampleCount,
+      debug: true
+    });
+    
+    // Complete after duration
+    if (sampleCount >= simulationDuration * 2) {
+      clearInterval(interval);
+      io.emit('vitals-complete', {
+        avg_bpm: simulatedBpm,
+        temp: parseFloat(simulatedTemp.toFixed(1)),
+        debug: true
+      });
+      console.log(`✅ [DEBUG] Vitals simulation complete`);
+    }
+  }, 500);
+  
+  res.json({ 
+    success: true, 
+    message: `Simulating vitals for ${simulationDuration}s`,
+    params: { bpm: simulatedBpm, temp: simulatedTemp }
+  });
+});
+
+// GET: Debug - Status
+app.get('/api/debug/status', (req, res) => {
+  // Explicitly set CORS headers
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  
+  res.json({ 
+    success: true,
+    debug_mode: true,
+    connected_clients: io.engine.clientsCount,
+    message: 'Debug endpoints available: POST /api/debug/rfid, POST /api/debug/vitals'
+  });
+});
+
 // --- START SERVER ---
 const PORT = 3001;
 server.listen(PORT, () => {
   console.log(`✅ MediSync Backend running on http://localhost:${PORT}`);
+  console.log(`🔓 CORS: Allowing all origins`);
+  console.log(`🔌 Socket.IO: Available at ws://localhost:${PORT}`);
 });

@@ -22,15 +22,15 @@
     }
   }
   ,
-  "forwardPorts": [5000, 5173],
+  "forwardPorts": [3001, 5173],
   "portsAttributes": {
-    "5000": {
-      "label": "Backend (5000)",
-      "onAutoForward": "openPreview",
+    "3001": {
+      "label": "Backend API",
+      "onAutoForward": "notify",
       "visibility": "public"
     },
     "5173": {
-      "label": "Frontend (5173)",
+      "label": "Frontend (Vite)",
       "onAutoForward": "openBrowser",
       "visibility": "public"
     }

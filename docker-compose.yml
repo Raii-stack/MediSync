@@ -33,15 +33,15 @@ services:
     container_name: medisync-frontend
     ports:
       - "5173:5173"
-    volumes:
-      - /app/node_modules
-      - /app/dist
     networks:
       - medisync-network
     depends_on:
       - backend
+    env_file:
+      - ./Kiosk/Frontend/.env
     environment:
-      - VITE_API_URL=http://localhost:3001
+      - CODESPACE_NAME=${CODESPACE_NAME}
+      - GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN=${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}
     develop:
       watch:
         - action: sync
@@ -51,9 +51,10 @@ services:
             - node_modules/
             - dist/
             - .git/
-            - .env
         - action: rebuild
           path: ./Kiosk/Frontend/package.json
+        - action: rebuild
+          path: ./Kiosk/Frontend/package-lock.json
 
 networks:
   medisync-network:

@@ -1,346 +1,142 @@
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { Box, Button, Flex, Text, VStack } from '@chakra-ui/react';
 import axios from 'axios';
-import { getBackendUrl } from '../lib/socket';
+import { gsap } from 'gsap';
+
+const API_BASE = import.meta.env.VITE_API_URL;
 
 export default function Prescription() {
   const { state } = useLocation();
   const navigate = useNavigate();
-  const [med, setMed] = useState(null);
-  const [medicines, setMedicines] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [dispenseLoading, setDispenseLoading] = useState(false);
-  const [error, setError] = useState('');
+  const medicine = state?.medicine || { name: 'Unknown', description: '' };
+  const pistonRef = useRef(null);
+  const [isDispensing, setIsDispensing] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const redirectTimerRef = useRef(null);
 
-  // Fetch medicine library on mount
   useEffect(() => {
-    const fetchMedicines = async () => {
-      try {
-        const res = await axios.get(`${getBackendUrl()}/api/admin/medicines`);
-        setMedicines(res.data.medicines || []);
-      } catch (err) {
-        console.error('❌ Failed to fetch medicines:', err);
-        setError('Could not load medicine library');
+    return () => {
+      if (redirectTimerRef.current) {
+        clearTimeout(redirectTimerRef.current);
       }
     };
-
-    fetchMedicines();
   }, []);
 
-  // Matching algorithm - finds best medicine based on symptoms
-  useEffect(() => {
-    if (!state || medicines.length === 0) {
-      if (medicines.length > 0 && !state) {
-        navigate('/');
-      }
-      return;
-    }
-
-    const userSymptoms = state.symptoms || [];
-
-    // Find medicine that matches any of the user's symptoms
-    const matchedMedicine = medicines.find(med => {
-      if (!med.symptoms_target) return false;
-
-      // Parse comma-separated symptoms from backend
-      const medicineSymptoms = med.symptoms_target
-        .split(',')
-        .map(s => s.trim())
-        .filter(s => s);
-
-      // Check if any user symptom matches any medicine symptom
-      return medicineSymptoms.some(medSymptom =>
-        userSymptoms.some(userSymptom =>
-          userSymptom.toLowerCase() === medSymptom.toLowerCase()
-        )
-      );
-    });
-
-    if (matchedMedicine) {
-      setMed(matchedMedicine.name);
-    } else {
-      // No match found - show fallback
-      setMed(null);
-    }
-
-    setLoading(false);
-  }, [medicines, state, navigate]);
-
   const handleDispense = async () => {
-    setDispenseLoading(true);
+    if (isDispensing) return;
+
+    setIsDispensing(true);
+
+    if (pistonRef.current) {
+      gsap
+        .timeline()
+        .to(pistonRef.current, { x: 100, duration: 0.25, ease: 'power2.out' })
+        .to(pistonRef.current, { x: 0, duration: 0.25, ease: 'power2.in', delay: 0.2 });
+    }
+
     try {
-      const res = await axios.post(`${getBackendUrl()}/api/dispense`, {
-        medicine: med,
-        student_id: state.student?.student_id || 'ANON',
-        student_name: state.student ? `${state.student.first_name} ${state.student.last_name}` : 'Unknown',
-        symptoms: state.symptoms,
-        pain_level: state.pain,
-        vitals: state.vitals || { temp: '--', bpm: '--' }
+      await axios.post(`${API_BASE}/api/dispense`, {
+        medicine: medicine.name
       });
 
-      console.log('✅ Dispense successful:', res.data);
-
-      // Navigate to receipt page with all the data
-      navigate('/receipt', {
-        state: {
-          student: state.student,
-          medicine: med,
-          vitals: state.vitals,
-          timestamp: res.data.timestamp
-        }
-      });
+      setIsSuccess(true);
+      redirectTimerRef.current = setTimeout(() => {
+        navigate('/');
+      }, 5000);
     } catch (err) {
-      console.error('❌ Dispense error:', err);
-      const errorMsg = err.response?.data?.message || 'Server Offline or Medicine Out of Stock';
-      alert(`Dispense Error: ${errorMsg}`);
-      setDispenseLoading(false);
+      console.error('Dispense error:', err);
+      setIsDispensing(false);
     }
   };
 
-  // Loading state
-  if (loading) {
-    return (
-      <div className="kiosk-container">
-        <div style={{ fontSize: '48px', marginBottom: '20px' }}>⏳</div>
-        <h2>Loading medicine library...</h2>
-      </div>
-    );
-  }
-
-  // Error state
-  if (error) {
-    return (
-      <div className="kiosk-container">
-        <div style={{ fontSize: '48px', marginBottom: '20px' }}>⚠️</div>
-        <h2>{error}</h2>
-        <button
-          onClick={() => navigate('/')}
-          style={{
-            marginTop: '40px',
-            padding: '15px 40px',
-            fontSize: '16px',
-            background: '#3498db',
-            color: 'white',
-            border: 'none',
-            borderRadius: '50px',
-            cursor: 'pointer'
-          }}
-        >
-          ← Back to Home
-        </button>
-      </div>
-    );
-  }
-
-  // No match found - fallback screen
-  if (med === null) {
-    return (
-      <div className="kiosk-container">
-        <h2 style={{ fontSize: '36px', marginBottom: '40px', color: '#e74c3c' }}>
-          Please Consult the Nurse
-        </h2>
-
-        <div style={{
-          border: '3px solid #e74c3c',
-          padding: '60px 40px',
-          borderRadius: '20px',
-          background: 'white',
-          width: '80%',
-          maxWidth: '600px',
-          textAlign: 'center',
-          boxShadow: '0 4px 15px rgba(0,0,0,0.1)'
-        }}>
-          <div style={{ fontSize: '80px', marginBottom: '20px' }}>🏥</div>
-
-          <h1 style={{ color: '#e74c3c', fontSize: '44px', marginBottom: '20px' }}>
-            Medical Consultation Required
-          </h1>
-
-          <p style={{ fontSize: '18px', color: '#7f8c8d', lineHeight: '1.8', marginBottom: '30px' }}>
-            The symptoms you reported require professional medical evaluation.
-            <br />
-            <br />
-            <strong>Please proceed to the clinic to see the nurse for proper assessment and treatment.</strong>
-          </p>
-
-          {/* Symptoms Summary */}
-          <div style={{
-            background: '#ecf0f1',
-            padding: '20px',
-            borderRadius: '15px',
-            marginBottom: '30px'
-          }}>
-            <p style={{ fontSize: '14px', color: '#7f8c8d', marginBottom: '10px' }}>
-              <strong>Reported symptoms:</strong>
-            </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
-              {state.symptoms.map((symptom, idx) => (
-                <span key={idx} style={{
-                  background: 'white',
-                  padding: '6px 12px',
-                  borderRadius: '20px',
-                  fontSize: '13px',
-                  color: '#2c3e50'
-                }}>
-                  {symptom}
-                </span>
-              ))}
-            </div>
-            {state.pain && (
-              <p style={{ fontSize: '13px', color: '#7f8c8d', marginTop: '10px' }}>
-                Pain Level: <strong>{state.pain}/10</strong>
-              </p>
-            )}
-          </div>
-        </div>
-
-        <button
-          onClick={() => navigate('/')}
-          style={{
-            marginTop: '40px',
-            padding: '25px 60px',
-            fontSize: '24px',
-            background: '#e74c3c',
-            color: 'white',
-            border: 'none',
-            borderRadius: '50px',
-            fontWeight: 'bold',
-            cursor: 'pointer'
-          }}
-        >
-          🏥 Go to Clinic
-        </button>
-
-        <button
-          onClick={() => navigate('/')}
-          style={{
-            marginTop: '20px',
-            padding: '15px 40px',
-            fontSize: '16px',
-            background: 'transparent',
-            color: '#7f8c8d',
-            border: '2px solid #bdc3c7',
-            borderRadius: '50px',
-            cursor: 'pointer'
-          }}
-        >
-          ← Cancel
-        </button>
-      </div>
-    );
-  }
-
-  // Get matched medicine details
-  const matchedMedicine = medicines.find(m => m.name === med);
-
   return (
-    <div className="kiosk-container">
-      <h2 style={{ fontSize: '36px', marginBottom: '40px' }}>Recommended Treatment</h2>
+    <Flex w="full" h="100vh" align="center" justify="center" px={{ base: 6, md: 10 }}>
+      <VStack spacing={8} maxW="720px" w="full">
+        <Box
+          w="full"
+          bg="white"
+          borderRadius="24px"
+          boxShadow="xl"
+          px={{ base: 6, md: 10 }}
+          py={{ base: 6, md: 8 }}
+        >
+          <Text fontSize={{ base: '2xl', md: '3xl' }} fontWeight="semibold" color="gray.700">
+            {medicine.name}
+          </Text>
+          <Text mt={3} color="gray.500" fontSize={{ base: 'md', md: 'lg' }}>
+            {medicine.description || 'No description available.'}
+          </Text>
+        </Box>
 
-      {/* Symptoms Summary */}
-      <div style={{
-        background: '#ecf0f1',
-        padding: '20px',
-        borderRadius: '15px',
-        marginBottom: '30px',
-        maxWidth: '600px'
-      }}>
-        <p style={{ fontSize: '16px', color: '#7f8c8d', marginBottom: '10px' }}>
-          <strong>Your symptoms:</strong>
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-          {state.symptoms.map((symptom, idx) => (
-            <span key={idx} style={{
-              background: 'white',
-              padding: '8px 16px',
-              borderRadius: '20px',
-              fontSize: '14px',
-              color: '#2c3e50'
-            }}>
-              {symptom}
-            </span>
-          ))}
-        </div>
-        <p style={{ fontSize: '14px', color: '#7f8c8d', marginTop: '10px' }}>
-          Pain Level: <strong>{state.pain}/10</strong>
-        </p>
-      </div>
+        <Box w="full" bg="white" borderRadius="24px" boxShadow="md" px={6} py={6}>
+          <Text fontSize="sm" color="gray.500" mb={3}>
+            Solenoid feedback
+          </Text>
+          <Box
+            bg="gray.100"
+            borderRadius="16px"
+            h="80px"
+            position="relative"
+            overflow="hidden"
+          >
+            <Box
+              ref={pistonRef}
+              position="absolute"
+              left="12px"
+              top="50%"
+              transform="translateY(-50%)"
+              bg="brand.500"
+              borderRadius="12px"
+              h="40px"
+              w="120px"
+              boxShadow="md"
+            />
+          </Box>
+        </Box>
 
-      {/* Medicine Card */}
-      <div style={{
-        border: '3px solid #2ecc71',
-        padding: '40px',
-        borderRadius: '20px',
-        background: 'white',
-        width: '80%',
-        maxWidth: '600px',
-        textAlign: 'center',
-        boxShadow: '0 4px 15px rgba(0,0,0,0.1)'
-      }}>
-        <div style={{ fontSize: '80px', marginBottom: '20px' }}>💊</div>
-        <h1 style={{ color: '#2ecc71', fontSize: '48px', marginBottom: '20px' }}>
-          {med}
-        </h1>
+        <Button
+          size="lg"
+          w="full"
+          bg="brand.500"
+          color="white"
+          _hover={{ bg: 'brand.600' }}
+          _active={{ bg: 'brand.700' }}
+          isLoading={isDispensing}
+          onClick={handleDispense}
+        >
+          DISPENSE NOW
+        </Button>
+      </VStack>
 
-        {matchedMedicine?.description && (
-          <p style={{ fontSize: '16px', color: '#7f8c8d', marginBottom: '15px' }}>
-            {matchedMedicine.description}
-          </p>
-        )}
-
-        <div style={{
-          background: '#f0f9f7',
-          padding: '15px',
-          borderRadius: '10px',
-          marginTop: '20px',
-          fontSize: '14px',
-          color: '#27ae60'
-        }}>
-          <p style={{ margin: '0' }}>
-            <strong>✓ Matched for:</strong> {matchedMedicine?.symptoms_target}
-          </p>
-        </div>
-      </div>
-
-      {/* Dispense Button */}
-      <button
-        onClick={handleDispense}
-        disabled={dispenseLoading}
-        style={{
-          marginTop: '40px',
-          padding: '25px 60px',
-          fontSize: '24px',
-          background: dispenseLoading ? '#95a5a6' : '#2ecc71',
-          color: 'white',
-          border: 'none',
-          borderRadius: '50px',
-          fontWeight: 'bold',
-          opacity: dispenseLoading ? 0.7 : 1,
-          cursor: dispenseLoading ? 'not-allowed' : 'pointer'
-        }}
-      >
-        {dispenseLoading ? '⏳ Dispensing...' : '💊 DISPENSE NOW'}
-      </button>
-
-      <button
-        onClick={() => navigate('/')}
-        style={{
-          marginTop: '20px',
-          padding: '15px 40px',
-          fontSize: '16px',
-          background: 'transparent',
-          color: '#7f8c8d',
-          border: '2px solid #bdc3c7',
-          borderRadius: '50px',
-          cursor: 'pointer'
-        }}
-      >
-        ← Cancel
-      </button>
-
-      <p style={{ fontSize: '14px', color: '#999', marginTop: '40px' }}>
-        Medicine will be dispensed from the kiosk
-      </p>
-    </div>
+      {isSuccess ? (
+        <Box
+          position="fixed"
+          inset={0}
+          bg="blackAlpha.600"
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+          zIndex={60}
+        >
+          <Box
+            bg="white"
+            borderRadius="20px"
+            px={8}
+            py={6}
+            maxW="420px"
+            w="90%"
+            boxShadow="xl"
+          >
+            <Text fontSize="xl" fontWeight="bold" color="gray.700">
+              Take Medicine
+            </Text>
+            <Text mt={2} color="gray.500">
+              Please take your medicine now. Returning to Home shortly.
+            </Text>
+          </Box>
+        </Box>
+      ) : null}
+    </Flex>
   );
 }

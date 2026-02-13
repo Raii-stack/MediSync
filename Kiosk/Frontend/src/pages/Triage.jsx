@@ -1,157 +1,134 @@
-import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
+import {
+  Box,
+  Button,
+  createToaster,
+  SimpleGrid,
+  Toaster,
+  Text,
+  VStack,
+  Spinner
+} from '@chakra-ui/react';
 
-const SYMPTOMS_LIST = [
-  { id: 'fever', label: 'Fever', icon: '🤒' },
-  { id: 'headache', label: 'Headache', icon: '🤕' },
-  { id: 'colds', label: 'Colds', icon: '🤧' },
-  { id: 'abdominal', label: 'Abdominal Pain', icon: '😣' },
-  { id: 'dysmenorrhea', label: 'Dysmenorrhea', icon: '💢' },
-  { id: 'dehydration', label: 'Dehydration', icon: '💧' },
-  { id: 'vomiting', label: 'Vomiting', icon: '🤮' },
-  { id: 'diarrhea', label: 'Diarrhea', icon: '🚽' }
+const API_BASE = import.meta.env.VITE_API_URL;
+
+const symptoms = [
+  'Headache',
+  'Fever',
+  'Cough',
+  'Colds',
+  'Stomach Pain',
+  'Allergy',
+  'Dizziness',
+  'Body Pain'
 ];
 
+const normalizeTargets = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map((item) => item.toLowerCase().trim());
+  return value
+    .split(',')
+    .map((item) => item.toLowerCase().trim())
+    .filter(Boolean);
+};
+
 export default function Triage() {
-  const { state } = useLocation(); // Get student & vitals from previous page
   const navigate = useNavigate();
-  const [pain, setPain] = useState(5);
-  const [selectedSymptoms, setSelected] = useState([]);
+  const toaster = useMemo(() => createToaster({ placement: 'top-end' }), []);
 
-  const toggleSymptom = (symptom) => {
-    if (selectedSymptoms.includes(symptom)) {
-      setSelected(selectedSymptoms.filter(s => s !== symptom));
-    } else {
-      setSelected([...selectedSymptoms, symptom]);
+  const { data: inventory, isLoading: inventoryLoading } = useQuery({
+    queryKey: ['inventory'],
+    queryFn: async () => {
+      const { data } = await axios.get(`${API_BASE}/api/inventory`);
+      return data;
     }
-  };
+  });
 
-  const handleSubmit = () => {
-    if (selectedSymptoms.length === 0) {
-      alert("Please select at least one symptom.");
+  const { data: medicines, isLoading: medsLoading } = useQuery({
+    queryKey: ['medicines'],
+    queryFn: async () => {
+      const { data } = await axios.get(`${API_BASE}/api/admin/medicines`);
+      return data?.medicines || [];
+    }
+  });
+
+  const inventoryWithTargets = useMemo(() => {
+    if (!inventory) return [];
+    return inventory.map((item) => ({
+      ...item,
+      targets: normalizeTargets(item.symptoms_target)
+    }));
+  }, [inventory]);
+
+  const handleSymptomClick = (symptom) => {
+    const normalized = symptom.toLowerCase();
+
+    const match = inventoryWithTargets.find(
+      (item) => item.current_stock > 0 && item.targets.includes(normalized)
+    );
+
+    if (match) {
+      const medicineDetails = medicines?.find((med) => med.name === match.medicine_name);
+
+      navigate('/prescription', {
+        state: {
+          medicine: {
+            name: match.medicine_name,
+            description: match.description || medicineDetails?.description || '',
+            symptoms_target: match.symptoms_target || medicineDetails?.symptoms_target || '',
+            current_stock: match.current_stock
+          }
+        }
+      });
       return;
     }
-    // Pass student, vitals, symptoms, and pain to prescription page
-    navigate('/prescription', { 
-      state: { 
-        student: state?.student,
-        vitals: state?.vitals,
-        symptoms: selectedSymptoms, 
-        pain 
-      } 
+
+    toaster.create({
+      title: 'No available medicine',
+      description: 'Please visit Nurse.',
+      type: 'error',
+      duration: 3000
     });
   };
 
-  const getPainEmoji = () => {
-    if (pain <= 3) return '🙂';
-    if (pain <= 6) return '😐';
-    if (pain <= 8) return '😟';
-    return '😢';
-  };
-
-  const getPainLabel = () => {
-    if (pain <= 3) return 'Mild';
-    if (pain <= 6) return 'Moderate';
-    if (pain <= 8) return 'Severe';
-    return 'Very Severe';
-  };
-
   return (
-    <div className="kiosk-container" style={{ justifyContent: 'flex-start', paddingTop: '60px', overflowY: 'auto', paddingBottom: '60px' }}>
-      <h2 style={{ fontSize: '36px', marginBottom: '40px' }}>How are you feeling?</h2>
-      
-      {/* Pain Scale Buttons */}
-      <div style={{ width: '80%', marginBottom: '40px', maxWidth: '700px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-          <label style={{ fontSize: '20px', fontWeight: 'bold' }}>Pain Scale</label>
-          <span style={{ fontSize: '32px' }}>{getPainEmoji()}</span>
-        </div>
-        <div style={{ textAlign: 'center', marginBottom: '10px' }}>
-          <span style={{ fontSize: '40px', fontWeight: 'bold', color: '#3498db' }}>{pain}</span>
-          <span style={{ fontSize: '20px', color: '#7f8c8d' }}> / 10</span>
-          <div style={{ fontSize: '16px', color: '#95a5a6', marginTop: '5px' }}>
-            {getPainLabel()}
-          </div>
-        </div>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
-          gap: '10px',
-          marginTop: '15px'
-        }}>
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((value) => {
-            const isActive = Number(pain) === value;
-            return (
-              <button
-                key={value}
-                onClick={() => setPain(value)}
-                style={{
-                  padding: '14px 0',
-                  fontSize: '18px',
-                  borderRadius: '12px',
-                  border: `2px solid ${isActive ? '#3498db' : '#bdc3c7'}`,
-                  background: isActive ? '#3498db' : 'white',
-                  color: isActive ? 'white' : '#2c3e50',
-                  fontWeight: 'bold'
-                }}
-              >
-                {value}
-              </button>
-            );
-          })}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '14px', color: '#7f8c8d' }}>
-          <span>1-3 Mild</span>
-          <span>4-6 Moderate</span>
-          <span>7-10 Severe</span>
-        </div>
-      </div>
+    <VStack spacing={8} align="center" justify="center" h="100vh" px={{ base: 6, md: 10 }}>
+      <Toaster toaster={toaster} />
+      <Box textAlign="center">
+        <Text fontSize={{ base: '2xl', md: '3xl' }} fontWeight="semibold" color="gray.700">
+          How are you feeling?
+        </Text>
+        <Text mt={2} color="gray.500" fontSize={{ base: 'md', md: 'lg' }}>
+          Select your primary symptom.
+        </Text>
+      </Box>
 
-      {/* Symptoms Grid */}
-      <h3 style={{ fontSize: '24px', marginBottom: '20px' }}>Select Your Symptoms:</h3>
-      <div className="symptoms-grid">
-        {SYMPTOMS_LIST.map((symptom) => {
-          const isSelected = selectedSymptoms.includes(symptom.label);
-          return (
-            <button
-              key={symptom.id}
-              onClick={() => toggleSymptom(symptom.label)}
-              style={{
-                padding: '20px', 
-                fontSize: '18px', 
-                border: '2px solid #3498db',
-                borderRadius: '15px', 
-                background: isSelected ? '#3498db' : 'white',
-                color: isSelected ? 'white' : '#3498db',
-                fontWeight: 'bold',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-            >
-              <span style={{ fontSize: '32px' }}>{symptom.icon}</span>
-              <span>{symptom.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {(inventoryLoading || medsLoading) && (
+        <VStack spacing={3}>
+          <Spinner size="xl" color="brand.500" />
+          <Text color="gray.500">Loading medicines...</Text>
+        </VStack>
+      )}
 
-      <button 
-        onClick={handleSubmit}
-        style={{ 
-          marginTop: '40px', 
-          padding: '20px 80px', 
-          fontSize: '24px', 
-          background: selectedSymptoms.length > 0 ? '#2ecc71' : '#95a5a6',
-          color: 'white', 
-          border: 'none', 
-          borderRadius: '50px',
-          fontWeight: 'bold'
-        }}
-      >
-        Get Recommendation →
-      </button>
-    </div>
+      <SimpleGrid columns={{ base: 2, md: 3 }} spacing={4} w={{ base: 'full', md: '70%' }}>
+        {symptoms.map((symptom) => (
+          <Button
+            key={symptom}
+            size="lg"
+            bg="white"
+            borderRadius="20px"
+            boxShadow="md"
+            _hover={{ boxShadow: 'lg', bg: 'gray.50' }}
+            _active={{ transform: 'scale(0.98)' }}
+            onClick={() => handleSymptomClick(symptom)}
+          >
+            {symptom}
+          </Button>
+        ))}
+      </SimpleGrid>
+    </VStack>
   );
 }

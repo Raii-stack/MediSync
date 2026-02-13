@@ -1,132 +1,320 @@
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useState, useRef } from 'react';
-import axios from 'axios';
-import { getBackendUrl } from '../lib/socket';
+import { Box, Button, Text, Flex } from '@chakra-ui/react';
+import { io } from 'socket.io-client';
+import hospitalIcon from '/hospital-icon.svg';
 
-const imgSvg = "https://www.figma.com/api/mcp/asset/ed05af8b-7ff7-45f9-83cf-74e02bea59c1";
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL;
 
 export default function Home() {
   const navigate = useNavigate();
-  const [adminClickCount, setAdminClickCount] = useState(0);
-  const adminTimeoutRef = useRef(null);
+  const [adminClicks, setAdminClicks] = useState(0);
+  const resetTimerRef = useRef(null);
+  const socketRef = useRef(null);
 
-  const handleLogoClick = () => {
-    if (adminTimeoutRef.current) {
-      clearTimeout(adminTimeoutRef.current);
-    }
-
-    const newCount = adminClickCount + 1;
-    setAdminClickCount(newCount);
-
-    if (newCount >= 5) {
-      console.log('🔐 Admin panel unlocked!');
-      setAdminClickCount(0);
-      navigate('/admin');
+  // Socket.IO connection for RFID scanning
+  useEffect(() => {
+    if (socketRef.current) {
       return;
     }
 
-    adminTimeoutRef.current = setTimeout(() => {
-      setAdminClickCount(0);
+    console.log('🔌 [Home] Connecting to Socket.IO:', SOCKET_URL);
+    
+    const socket = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      timeout: 10000,
+      autoConnect: true,
+    });
+
+    socket.on('connect', () => {
+      console.log('✅ [Home] Socket connected:', socket.id);
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.log('❌ [Home] Socket disconnected:', reason);
+    });
+
+    socket.on('rfid-scan', (data) => {
+      console.log('🔴 [Home] RFID scan received:', data);
+      
+      if (data.student) {
+        console.log('✅ [Home] Navigating to vitals with student:', data.student);
+        navigate('/vitals', { state: { student: data.student } });
+      } else {
+        console.log('⚠️ [Home] No student found, navigating to vitals anyway');
+        navigate('/vitals');
+      }
+    });
+
+    socketRef.current = socket;
+
+    return () => {
+      console.log('🔌 [Home] Cleaning up socket connection');
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [navigate]);
+
+  const handleTapIdCard = async () => {
+    // Simulate scanning student ID card
+    // In production, this would read from NFC/RFID scanner
+    const mockStudentId = '20240001';
+    
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ student_id: mockStudentId })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success && data.student) {
+        console.log('✅ Student logged in:', data.student);
+        navigate('/vitals', { state: { student: data.student } });
+      } else {
+        console.error('❌ Login failed');
+        // Still navigate but with default name
+        navigate('/vitals');
+      }
+    } catch (error) {
+      console.error('❌ Login error:', error);
+      // Still navigate but with default name
+      navigate('/vitals');
+    }
+  };
+
+  const handleLogoClick = () => {
+    const nextCount = adminClicks + 1;
+    setAdminClicks(nextCount);
+
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+    }
+
+    if (nextCount >= 5) {
+      setAdminClicks(0);
+      navigate('/admin/slots');
+      return;
+    }
+
+    resetTimerRef.current = setTimeout(() => {
+      setAdminClicks(0);
     }, 1500);
   };
 
-  const handleEmergency = async () => {
-    const confirm = window.confirm("Are you sure you want to call the Clinic?");
-    if (!confirm) return;
-
-    try {
-      await axios.post(`${getBackendUrl()}/api/emergency`, { 
-        room_number: "KIOSK-01" 
-      });
-      alert("ALARM SENT! The Nurse has been notified.");
-    } catch (err) {
-      console.error('Emergency alert error:', err);
-      alert("Error: Backend not connected. Please check if server is running.");
-    }
-  };
-
-  const simulateTap = async () => {
-    console.log('💳 RFID Tapped!');
-    try {
-      const res = await axios.post(`${getBackendUrl()}/api/login`, {
-        student_id: '123456',
-      });
-
-      if (res.data.success) {
-        console.log('✅ Login successful:', res.data.student);
-        navigate('/vitals', { state: { student: res.data.student } });
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
       }
-    } catch (err) {
-      console.error('❌ Login Error:', err);
-    }
-  };
+    };
+  }, []);
 
   return (
-    <div className="relative w-full min-h-screen bg-[#f9fafb] flex flex-col items-center justify-center overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
-      
-      {/* Emergency Button */}
-      <div className="absolute top-6 right-6 z-20">
-        <button
-          onClick={handleEmergency}
-          className="bg-[#ef4444] text-white px-6 py-3 rounded-full font-bold shadow-lg flex items-center gap-2 hover:bg-red-600 transition-colors uppercase tracking-wide text-sm"
+    <Box
+      bg="#f5f5f5"
+      width="100vw"
+      height="100vh"
+      position="relative"
+      overflow="hidden"
+    >
+      {/* Top centered content */}
+      <Box
+        position="absolute"
+        left="50%"
+        top="50%"
+        transform="translate(-50%, calc(-50% - 141.5px))"
+        width="625.78px"
+      >
+        {/* Logo */}
+        <Flex
+          onClick={handleLogoClick}
+          cursor="pointer"
+          justifyContent="center"
+          alignItems="center"
+          width="218px"
+          height="218px"
+          margin="0 auto"
+          padding="10px"
         >
-          <span className="material-icons animate-pulse">warning</span>
-          EMERGENCY
-        </button>
-      </div>
+          <Box position="relative" width="135px" height="135px">
+            {/* Outer border */}
+            <Box
+              position="absolute"
+              top="-32px"
+              left="-32px"
+              right="-32px"
+              bottom="-32px"
+              border="2px solid #bfdbfe"
+              borderRadius="50%"
+              opacity={0.6}
+            />
+            {/* Inner dashed border */}
+            <Box
+              position="absolute"
+              top="-16px"
+              left="-16px"
+              right="-16px"
+              bottom="-16px"
+              border="1px dashed #93c5fd"
+              borderRadius="50%"
+              opacity={0.4}
+            />
+            {/* Main logo box */}
+            <Box
+              backgroundColor="#3b82f6"
+              bg="#3b82f6"
+              width="135px"
+              height="135px"
+              borderRadius="32px"
+              position="relative"
+              display="flex"
+              alignItems="center"
+              justifyContent="center"
+              boxShadow="0px 20px 25px -5px rgba(0,0,0,0.1), 0px 8px 10px -6px rgba(0,0,0,0.1)"
+              overflow="hidden"
+              css={{ backgroundColor: '#3b82f6 !important' }}
+              style={{ backgroundColor: '#3b82f6' }}
+            >
+              {/* Gradient overlay */}
+              <Box
+                position="absolute"
+                top="50%"
+                left="0"
+                right="0"
+                transform="translateY(-50%)"
+                height="192px"
+                bgGradient="linear(45deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.2) 100%)"
+                pointerEvents="none"
+              />
+              {/* Icon */}
+              <Box position="relative" zIndex={1} width="78px" height="78px">
+                <img src={hospitalIcon} alt="Hospital" style={{ width: '100%', height: '100%', filter: 'brightness(0) invert(1)' }} />
+              </Box>
+            </Box>
+          </Box>
+        </Flex>
 
-      {/* Logo Section */}
-      <div className="-translate-y-20 pt-8 pb-12 flex flex-col items-center z-90">
-        <div className="relative flex items-center justify-center cursor-pointer" onClick={handleLogoClick}>
-          {/* Outer Ring - border-2, inset -32px from logo */}
-          <div className="absolute border-2 border-[#bfdbfe] rounded-full opacity-60" style={{ inset: '-32px' }}></div>
-          {/* Inner Dashed Ring - border, inset -16px from logo */}
-          <div className="absolute border border-[#93c5fd] border-dashed rounded-full opacity-40" style={{ inset: '-16px' }}></div>
-          
-          {/* Main Icon Container - 192x192 */}
-          <div className="relative w-[182px] h-[182px] bg-[#3b82f6] rounded-[32px] shadow-[0px_20px_25px_-5px_rgba(0,0,0,0.1),0px_8px_10px_-6px_rgba(0,0,0,0.1)] flex items-center justify-center overflow-hidden transition-transform active:scale-95">
-            <div className="absolute inset-0" style={{ backgroundImage: "linear-gradient(45deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.1) 50%, rgba(255, 255, 255, 0.2) 100%)" }}></div>
-            <img src={imgSvg} alt="MediSync Logo" className="w-[96px] h-[96px] relative z-10" />
-          </div>
-        </div>
-      </div>
+        {/* Heading */}
+        <Box textAlign="center" marginTop="6px">
+          <Text
+            fontSize="60px"
+            fontWeight="700"
+            fontFamily="'Inter', sans-serif"
+            color="#111827"
+            letterSpacing="-1.5px"
+            lineHeight="60px"
+          >
+            Welcome to{' '}
+            <Text as="span" color="#3b82f6" fontWeight="700" fontFamily="'Inter', sans-serif">
+              MediSync
+            </Text>
+          </Text>
+        </Box>
 
-      {/* Headings */}
-      <div className="-translate-y-15 flex flex-col items-center gap-[23.5px] px-4 pb-16 max-w-[672px]">
-        <h1 className="text-[60px] leading-[60px] font-bold text-[#111827] tracking-[-1.5px] text-center">
-          Welcome to <span className="text-[#3b82f6]">MediSync</span>
-        </h1>
-        <p className="-translate-y-7 text-[24px] leading-[32px] font-light text-[#6b7280] text-center">
-          Your Smart Health Kiosk
-        </p>
-      </div>
+        {/* Subtitle */}
+        <Box textAlign="center" marginTop="6px" padding="10px">
+          <Text
+            fontSize="24px"
+            fontWeight="300"
+            fontFamily="'Inter', sans-serif"
+            color="#6b7280"
+            lineHeight="32px"
+          >
+            Your Smart Health Kiosk
+          </Text>
+        </Box>
+      </Box>
 
-      {/* Action Section */}
-      <div className="flex flex-col items-center w-full px-[288px] max-w-full">
-        {/* Instruction Text */}
-        <p className="text-[16px] pb-[10px] leading-[24px] font-medium text-[#9ca3af] uppercase tracking-[3.2px] text-center mb-8">
-          Tap your Student ID to begin
-        </p>
-        
-        {/* Button */}
-        <button
-          id="debug-btn"
-          onClick={simulateTap}
-          className="h-[70px] w-full max-w-[520px] bg-[#3b82f6] text-white rounded-[24px] py-[40px] px-[80px] shadow-[0px_20px_25px_-5px_rgba(0,0,0,0.1),0px_8px_10px_-6px_rgba(0,0,0,0.1)] flex items-center justify-center gap-4 hover:bg-blue-600 transition-all transform hover:-translate-y-1 overflow-hidden"
+      {/* Bottom action section */}
+      <Box
+        position="absolute"
+        left="50%"
+        top="50%"
+        transform="translate(-50%, calc(-50% + 204.5px))"
+        width="453px"
+      >
+        {/* Instruction text */}
+        <Text
+          fontSize="16px"
+          fontWeight="500"
+          fontFamily="'Inter', sans-serif"
+          color="#9ca3af"
+          textAlign="center"
+          letterSpacing="3.2px"
+          textTransform="uppercase"
+          lineHeight="24px"
+          marginBottom="17px"
         >
-          <span className="material-icons text-[30px] leading-[36px]">nfc</span>
-          <span className="text-[24px] font-semibold tracking-[0.6px] leading-[32px]">
+          Waiting for RFID scan...
+        </Text>
+
+        {/* Tap ID Card Button - DISABLED (Use Debug Panel or Hardware RFID) */}
+        <Button
+          backgroundColor="#3b82f6"
+          bg="#3b82f6"
+          borderRadius="24px"
+          height="81px"
+          width="100%"
+          disabled={true}
+          cursor="not-allowed"
+          paddingX="77px"
+          paddingY="18px"
+          display="flex"
+          alignItems="center"
+          justifyContent="center"
+          gap="12px"
+          marginBottom="17px"
+          css={{ backgroundColor: '#3b82f6 !important' }}
+          style={{ backgroundColor: '#3b82f6' }}
+          border="none"
+          boxShadow="0px 10px 25px -5px rgba(59, 130, 246, 0.4), 0px 4px 10px -3px rgba(59, 130, 246, 0.3)"
+          opacity={1}
+        >
+          <Flex alignItems="center" justifyContent="center" width="44px" height="44px">
+            <Text fontSize="36px" color="white" fontFamily="'Material Icons'" lineHeight="1">
+              nfc
+            </Text>
+          </Flex>
+          <Text
+            fontSize="26px"
+            fontWeight="600"
+            fontFamily="'Inter', sans-serif"
+            color="white"
+            whiteSpace="nowrap"
+          >
             Tap ID Card
-          </span>
-        </button>
+          </Text>
+        </Button>
 
-        {/* Footer Text */}
-        <div className="fixed bottom-8 flex flex-col items-center gap-2 pt-8 max-w-[320px] px-4">
-          <p className="text-[12px] text-[#878d99] opacity-70 leading-[16px] text-center" style={{ fontFamily: "'Liberation Mono', monospace" }}>
-        v3.0.1
-          </p>
-        </div>
-      </div>
-    </div>
+        {/* Version text */}
+        <Text
+          fontSize="14px"
+          fontWeight="500"
+          fontFamily="'Inter', sans-serif"
+          color="rgba(156,163,175,0.7)"
+          textAlign="center"
+          letterSpacing="3.2px"
+          textTransform="uppercase"
+          lineHeight="24px"
+        >
+          v1.0.1
+        </Text>
+      </Box>
+
+      {/* Bottom gradient bar */}
+      <Box
+        position="absolute"
+        bottom="-1px"
+        left="0"
+        right="0"
+        height="8px"
+        bgGradient="linear(to-r, #93c5fd, #3b82f6, #93c5fd)"
+      />
+    </Box>
   );
 }

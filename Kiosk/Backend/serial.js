@@ -3,7 +3,7 @@ const { ReadlineParser } = require('@serialport/parser-readline');
 
 // --- CONFIGURATION ---
 // Force simulation if you don't have hardware connected right now
-const FORCE_SIMULATION = true; 
+const FORCE_SIMULATION = false; 
 const PORT_PATH = 'COM3'; 
 
 let port = null;
@@ -13,6 +13,7 @@ let globalCallback = null; // We save the callback here so we can restart it lat
 let simulationInterval = null;
 let isScanning = false;
 let autoStopTimer = null;
+let stopCallback = null; // Callback when scan stops
 
 // 1. Try to Connect
 if (!FORCE_SIMULATION) {
@@ -57,8 +58,10 @@ function startSimulationGenerator(callback) {
     // Print to console so you can see it working
     console.log(`[SIM] ❤️  Generated: ${JSON.stringify(fakeData)}`);
     
-    // Send to Frontend
-    if (callback) callback(fakeData);
+    // Send to server handler
+    if (callback) {
+      callback({ type: 'vitals', data: fakeData });
+    }
   }, 2000);
 }
 
@@ -83,6 +86,10 @@ function startAutoStopTimer() {
     if (isScanning) {
       console.log('[AUTO] ⏱️  Scan auto-stopped after 35 seconds.');
       module.exports.stopScan();
+      // Notify via callback that the scan completed
+      if (stopCallback) {
+        stopCallback();
+      }
     }
   }, 35000);
 }
@@ -107,11 +114,28 @@ module.exports = {
     if (!isSimulationMode && port && parser) {
       // Real Mode
       parser.on('data', (line) => {
-        if (!isScanning) return;
-        try {
-          const json = JSON.parse(line);
-          callback(json);
-        } catch (e) { console.error("Bad Serial Data"); }
+        const trimmed = line.trim();
+        if (!trimmed) return;
+
+        if (trimmed.startsWith('LOGIN:')) {
+          const uid = trimmed.slice('LOGIN:'.length).trim();
+          if (uid) {
+            callback({ type: 'login', uid });
+          }
+          return;
+        }
+
+        if (trimmed.startsWith('VITALS:')) {
+          if (!isScanning) return;
+          const jsonPayload = trimmed.slice('VITALS:'.length).trim();
+          try {
+            const json = JSON.parse(jsonPayload);
+            callback({ type: 'vitals', data: json });
+          } catch (e) {
+            console.error('Bad VITALS payload:', jsonPayload);
+          }
+          return;
+        }
       });
       console.log("✅ Listening to Real ESP32...");
     } else {
@@ -125,8 +149,8 @@ module.exports = {
   // Send Dispense Command
   dispense: (servoId) => {
     if (!isSimulationMode && port) {
-      const command = JSON.stringify({ action: 'dispense', servo: servoId });
-      port.write(command + '\n');
+      const command = `DISPENSE:${servoId}`;
+      port.write(`${command}\n`);
       console.log(`📤 Sent to ESP32: ${command}`);
     } else {
       console.log(`[SIM] 💊 Dispensing Servo ${servoId} (Fake Motor Move)`);
@@ -163,5 +187,10 @@ module.exports = {
     } else {
       stopSimulationGenerator();
     }
+  },
+
+  // Register callback for when scan stops
+  onStop: (callback) => {
+    stopCallback = callback;
   }
 };
