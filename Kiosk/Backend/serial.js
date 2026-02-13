@@ -12,6 +12,7 @@ let isSimulationMode = false;
 let globalCallback = null; // We save the callback here so we can restart it later
 let simulationInterval = null;
 let isScanning = false;
+let autoStopTimer = null;
 
 // 1. Try to Connect
 if (!FORCE_SIMULATION) {
@@ -69,6 +70,23 @@ function stopSimulationGenerator() {
   }
 }
 
+function clearAutoStopTimer() {
+  if (autoStopTimer) {
+    clearTimeout(autoStopTimer);
+    autoStopTimer = null;
+  }
+}
+
+function startAutoStopTimer() {
+  clearAutoStopTimer();
+  autoStopTimer = setTimeout(() => {
+    if (isScanning) {
+      console.log('[AUTO] ⏱️  Scan auto-stopped after 35 seconds.');
+      module.exports.stopScan();
+    }
+  }, 35000);
+}
+
 // 3. Logic to Switch Modes Automatically
 function switchToSimulation() {
   if (isSimulationMode) return; // Already in sim mode
@@ -119,6 +137,7 @@ module.exports = {
   startScan: () => {
     console.log('[DEBUG] startScan called. isSimulationMode:', isSimulationMode, 'globalCallback exists:', !!globalCallback);
     isScanning = true;
+    startAutoStopTimer();
     if (!isSimulationMode && port) {
       const command = JSON.stringify({ action: 'wake' });
       port.write(command + '\n');
@@ -136,6 +155,7 @@ module.exports = {
   stopScan: () => {
     console.log('[DEBUG] stopScan called');
     isScanning = false;
+    clearAutoStopTimer();
     if (!isSimulationMode && port) {
       const command = JSON.stringify({ action: 'sleep' });
       port.write(command + '\n');

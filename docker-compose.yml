@@ -1,5 +1,4 @@
 services:
-  # Backend Service
   backend:
     build:
       context: ./Kiosk/Backend
@@ -8,8 +7,8 @@ services:
     ports:
       - "3001:3001"
     volumes:
-      - ./Kiosk/Backend:/app
       - /app/node_modules
+      # Persist the app directory
       - backend-db:/app
     environment:
       - NODE_ENV=development
@@ -27,7 +26,6 @@ services:
         - action: rebuild
           path: ./Kiosk/Backend/package.json
 
-  # Frontend Service
   frontend:
     build:
       context: ./Kiosk/Frontend
@@ -36,7 +34,6 @@ services:
     ports:
       - "5173:5173"
     volumes:
-      - ./Kiosk/Frontend:/app
       - /app/node_modules
       - /app/dist
     networks:
@@ -63,4 +60,5 @@ networks:
     driver: bridge
 
 volumes:
-  backend-db:
+  # FIX: Add '{}' to explicitly define this as a mapping
+  backend-db: {}

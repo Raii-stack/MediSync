@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { socket, getBackendUrl } from '../lib/socket';
+import EmergencyBtn from '../components/EmergencyBtn';
+
+const imgHeartWithPulse = "https://www.figma.com/api/mcp/asset/b03a635a-4426-452b-86ad-691c07250801";
+const imgTemperature = "https://www.figma.com/api/mcp/asset/fac53357-7104-4b42-9a04-1fa91096a7b0";
 
 export default function Vitals() {
   const { state } = useLocation(); // Get student data passed from Home
@@ -107,73 +111,89 @@ export default function Vitals() {
   }, [navigate]);
 
   return (
-    <div className="kiosk-container">
-      {/* GREETING HEADER */}
-      <div style={{ 
-        position: 'absolute', 
-        top: '20px', 
-        left: '20px', 
-        fontSize: '24px', 
-        fontWeight: 'bold', 
-        color: '#2c3e50' 
-      }}>
-        Hello, {student.first_name} 👋
+    <div
+      className="relative w-full h-screen bg-[#f5f5f5] overflow-hidden"
+      style={{ fontFamily: "'Poppins', sans-serif" }}
+    >
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#f5f5f5] md:hidden">
+        <p className="text-[22px] font-medium text-[#2b2828]">Tablet or desktop required</p>
+        <p className="text-[14px] font-medium text-[rgba(43,40,40,0.49)] text-center max-w-[260px]">
+          This kiosk experience is not available on phones. Please use a larger screen.
+        </p>
       </div>
 
-      <h2 style={{ fontSize: '36px', marginBottom: '10px' }}>Vital Signs Check</h2>
-      <p style={{ fontSize: '16px', color: '#7f8c8d', marginBottom: '40px' }}>
-        {isFinalized
-          ? '✅ Average captured. Proceeding to triage...'
-          : scanStarted
-          ? `Collecting for accuracy... ${remainingSeconds}s`
-          : 'Waiting for sensor data...'}
-      </p>
-
-      <div style={{ display: 'flex', gap: '40px', marginTop: '20px' }}>
-        
-        {/* Heart Rate Card */}
-        <div style={{ 
-          padding: '40px', 
-          background: 'white', 
-          borderRadius: '20px', 
-          boxShadow: '0 4px 15px rgba(0,0,0,0.1)', 
-          textAlign: 'center',
-          minWidth: '250px'
-        }}>
-          <div style={{ fontSize: '40px', marginBottom: '10px' }}>❤️</div>
-          <h3 style={{ fontSize: '20px', color: '#7f8c8d', marginBottom: '10px' }}>Heart Rate</h3>
-          <h1 style={{ fontSize: '60px', color: '#e74c3c', margin: '10px 0' }}>
-            {vitals.bpm}
-          </h1>
-          <span style={{ fontSize: '18px', color: '#95a5a6' }}>BPM</span>
+      <div className="hidden h-full md:flex md:flex-col">
+        <div className="flex items-center justify-between px-10 lg:px-[38px] pt-8">
+          <p className="text-[32px] lg:text-[36px] font-semibold text-[rgba(43,40,40,0.85)]">
+            Hello, {student.first_name}!
+          </p>
         </div>
 
-        {/* Temperature Card */}
-        <div style={{ 
-          padding: '40px', 
-          background: 'white', 
-          borderRadius: '20px', 
-          boxShadow: '0 4px 15px rgba(0,0,0,0.1)', 
-          textAlign: 'center',
-          minWidth: '250px'
-        }}>
-          <div style={{ fontSize: '40px', marginBottom: '10px' }}>🌡️</div>
-          <h3 style={{ fontSize: '20px', color: '#7f8c8d', marginBottom: '10px' }}>Temperature</h3>
-          <h1 style={{ fontSize: '60px', color: '#3498db', margin: '10px 0' }}>
-            {vitals.temp}
-          </h1>
-          <span style={{ fontSize: '18px', color: '#95a5a6' }}>°C</span>
+        <div className="hidden md:block">
+          <EmergencyBtn />
         </div>
 
+        <div className="mt-6 flex flex-col items-center">
+          <p className="text-[32px] lg:text-[36px] font-semibold text-[rgba(43,40,40,0.85)]">
+            Vital Signs Check
+          </p>
+          <p className="mt-2 text-[14px] lg:text-[16px] font-medium text-[rgba(43,40,40,0.49)] text-center">
+            {isFinalized
+              ? 'Average captured. Proceeding to triage...'
+              : scanStarted
+              ? `Collecting for accuracy... ${remainingSeconds}s`
+              : 'Waiting for sensor data...'}
+          </p>
+        </div>
+
+        <div className="flex-1 flex items-start justify-center">
+          <div className="mt-10 flex gap-10 lg:gap-[120px]">
+            <div className="bg-[#f8f8f8] grid grid-rows-[repeat(4,minmax(0,1fr))] gap-[6px] h-[420px] lg:h-[449px] w-[280px] lg:w-[320px] px-[21px] py-[26px] rounded-[24px] shadow-[3px_4px_13.1px_0px_rgba(0,0,0,0.25)]">
+              <div className="flex items-center justify-center -mb-[2px]">
+                <img alt="" src={imgHeartWithPulse} className="w-[80px] h-[80px] lg:w-[90px] lg:h-[90px]" />
+              </div>
+              <div className="flex items-center justify-center">
+                <p className="text-[28px] lg:text-[32px] font-medium text-[#7f8c8d] text-center">Heart Rate</p>
+              </div>
+              <div className="flex items-center justify-center">
+                <p className="text-[96px] lg:text-[112px] font-medium text-[#eb3223] leading-[1] text-center">
+                  {vitals.bpm}
+                </p>
+              </div>
+              <div className="flex items-center justify-center">
+                <p className="text-[20px] lg:text-[24px] font-medium text-[#7f8c8d] text-center">BPM</p>
+              </div>
+            </div>
+
+            <div className="bg-[#f8f8f8] grid grid-rows-[repeat(4,minmax(0,1fr))] gap-[6px] h-[420px] lg:h-[449px] w-[280px] lg:w-[320px] px-[21px] py-[26px] rounded-[24px] shadow-[3px_4px_13.1px_0px_rgba(0,0,0,0.25)]">
+              <div className="flex items-center justify-center -mb-[2px]">
+                <img alt="" src={imgTemperature} className="w-[80px] h-[80px] lg:w-[90px] lg:h-[90px]" />
+              </div>
+              <div className="flex items-center justify-center">
+                <p className="text-[28px] lg:text-[32px] font-medium text-[#7f8c8d] text-center">Temperature</p>
+              </div>
+              <div className="flex items-center justify-center">
+                <p className="text-[88px] lg:text-[96px] font-medium text-[#3b82f6] leading-[1] text-center">
+                  {vitals.temp}
+                </p>
+              </div>
+              <div className="flex items-center justify-center">
+                <p className="text-[20px] lg:text-[24px] font-medium text-[#7f8c8d] text-center">°C</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="pb-10 flex justify-center">
+          <p className="text-[14px] lg:text-[16px] font-medium text-[rgba(43,40,40,0.49)] text-center">
+            {isFinalized
+              ? 'Vitals locked. Moving to triage.'
+              : scanStarted
+              ? 'Capturing heart rate and temperature...'
+              : 'Place your finger on the sensor...'}
+          </p>
+        </div>
       </div>
-
-      <p style={{ fontSize: '14px', color: '#999', marginTop: '40px' }}>
-        {isFinalized
-          ? 'Vitals locked. Moving to triage.'
-          : scanStarted
-          ? 'Capturing heart rate and temperature...'
-          : 'Place your finger on the sensor...'}
-      </p>
     </div>
   );
 }

@@ -112,7 +112,7 @@ export default function Home() {
         <button
           id="debug-btn"
           onClick={simulateTap}
-          className="h-[60px] w-full max-w-[520px] bg-[#3b82f6] text-white rounded-[24px] py-[40px] px-[80px] shadow-[0px_20px_25px_-5px_rgba(0,0,0,0.1),0px_8px_10px_-6px_rgba(0,0,0,0.1)] flex items-center justify-center gap-4 hover:bg-blue-600 transition-all transform hover:-translate-y-1 overflow-hidden"
+          className="h-[70px] w-full max-w-[520px] bg-[#3b82f6] text-white rounded-[24px] py-[40px] px-[80px] shadow-[0px_20px_25px_-5px_rgba(0,0,0,0.1),0px_8px_10px_-6px_rgba(0,0,0,0.1)] flex items-center justify-center gap-4 hover:bg-blue-600 transition-all transform hover:-translate-y-1 overflow-hidden"
         >
           <span className="material-icons text-[30px] leading-[36px]">nfc</span>
           <span className="text-[24px] font-semibold tracking-[0.6px] leading-[32px]">
