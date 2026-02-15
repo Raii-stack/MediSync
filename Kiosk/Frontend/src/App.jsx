@@ -6,6 +6,7 @@ import Vitals from './pages/Vitals.jsx';
 import Triage from './pages/Triage.jsx';
 import Prescription from './pages/Prescription.jsx';
 import AdminSlots from './pages/AdminSlots.jsx';
+import VitalsScreen from './pages/VitalsScreen.js';
 
 function App() {
   return (
@@ -13,7 +14,7 @@ function App() {
       <KioskLayout>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/vitals" element={<Vitals />} />
+          <Route path="/vitals" element={<VitalsScreen />} />
           <Route path="/triage" element={<Triage />} />
           <Route path="/prescription" element={<Prescription />} />
           <Route
