@@ -1,18 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { Box, Text, Grid, GridItem, Progress, Dialog } from '@chakra-ui/react';
-import { io } from 'socket.io-client';
-import { CheckCircle } from 'lucide-react';
-import EmergencyButton from '../components/EmergencyButton';
-import heartPulseIcon from '../assets/heart-icon.png';
-import temperatureIcon from '../assets/temp-icon.png';
+import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Box, Text, Grid, GridItem, Progress, Dialog } from "@chakra-ui/react";
+import { io } from "socket.io-client";
+import { CheckCircle } from "lucide-react";
+import heartPulseIcon from "../assets/heart-icon.png";
+import temperatureIcon from "../assets/temp-icon.png";
 
 // Use the proxy base URL configured in docker-compose and vite.config
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
 const SOCKET_URL = API_BASE_URL;
 const API_URL = API_BASE_URL;
 const CLIENT_SESSION_ID =
-  (typeof crypto !== 'undefined' && crypto.randomUUID)
+  typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -20,12 +20,14 @@ export default function Vitals() {
   const location = useLocation();
   const navigate = useNavigate();
   const student = location.state?.student;
-  const studentName = student?.first_name || 'Ryan';
+  const studentName = student?.first_name || "Ryan";
 
   const [progress, setProgress] = useState(0);
   const [bpm, setBpm] = useState(0);
-  const [displayTemp, setDisplayTemp] = useState('--');
-  const [status, setStatus] = useState('Waiting');
+  const [displayTemp, setDisplayTemp] = useState("--");
+  const [status, setStatus] = useState(
+    "Waiting, Please put your finger on the scanner",
+  );
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const socketRef = useRef(null);
@@ -38,73 +40,72 @@ export default function Vitals() {
     }
 
     isMountedRef.current = true;
-    console.log('🔌 Initializing Socket.IO connection to:', SOCKET_URL);
-    
+    console.log("🔌 Initializing Socket.IO connection to:", SOCKET_URL);
+
     // Create socket connection
-    const socket = io(SOCKET_URL, { 
+    const socket = io(SOCKET_URL, {
       auth: { sessionId: CLIENT_SESSION_ID },
-      transports: ['websocket', 'polling'],
+      transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionAttempts: 999,
       reconnectionDelay: 500,
       reconnectionDelayMax: 2000,
       randomizationFactor: 0.5,
       timeout: 30000,
-      path: '/socket.io/',
+      path: "/socket.io/",
       autoConnect: true,
       forceNew: false,
       multiplex: false,
       upgrade: true,
-      rememberUpgrade: true
+      rememberUpgrade: true,
     });
-    
+
     socketRef.current = socket;
 
-    socket.on('connect', () => {
+    socket.on("connect", () => {
       if (!isMountedRef.current) return;
-      
-      console.log('✅ Socket.IO connected to:', SOCKET_URL);
-      console.log('Socket ID:', socket.id);
-      
-      
+
+      console.log("✅ Socket.IO connected to:", SOCKET_URL);
+      console.log("Socket ID:", socket.id);
+
       // Start scanning when connected (only once)
       if (!scanStartedRef.current) {
         scanStartedRef.current = true;
-        fetch(`${API_URL}/api/scan/start`, { method: 'POST' })
-          .then(res => res.json())
-          .then(data => {
-            console.log('🟢 Scan started:', data);
+        fetch(`${API_URL}/api/scan/start`, { method: "POST" })
+          .then((res) => res.json())
+          .then((data) => {
+            console.log("🟢 Scan started:", data);
           })
-          .catch(err => {
-            console.error('❌ Error starting scan:', err);
+          .catch((err) => {
+            console.error("❌ Error starting scan:", err);
             scanStartedRef.current = false;
           });
       }
     });
-    
-    socket.on('disconnect', (reason) => {
-      console.log('❌ Socket.IO disconnected:', reason);
+
+    socket.on("disconnect", (reason) => {
+      console.log("❌ Socket.IO disconnected:", reason);
       if (isMountedRef.current) {
-        setStatus('Waiting');
+        setStatus("Waiting, Please put your finger on the scanner");
       }
     });
 
-    socket.on('connect_error', (error) => {
-      console.error('❌ Socket.IO connection error:', error.message);
+    socket.on("connect_error", (error) => {
+      console.error("❌ Socket.IO connection error:", error.message);
     });
 
-    socket.on('reconnect_attempt', (attemptNumber) => {
-      console.log('🔄 Reconnect attempt:', attemptNumber);
+    socket.on("reconnect_attempt", (attemptNumber) => {
+      console.log("🔄 Reconnect attempt:", attemptNumber);
     });
 
-    socket.on('reconnect', () => {
-      console.log('✅ Reconnected to Socket.IO');
+    socket.on("reconnect", () => {
+      console.log("✅ Reconnected to Socket.IO");
     });
 
-    socket.on('vitals-progress', (data) => {
+    socket.on("vitals-progress", (data) => {
       if (!isMountedRef.current) return;
-      
-      console.log('📊 Vitals progress received:', data);
+
+      console.log("📊 Vitals progress received:", data);
       const liveBpm = Number.parseFloat(data?.bpm);
       const liveTemp = Number.parseFloat(data?.temp);
       const rawProgress = Number.parseFloat(data?.progress);
@@ -122,23 +123,23 @@ export default function Vitals() {
         setProgress(clamped);
       }
 
-      setStatus('Scanning');
+      setStatus("Scanning");
     });
 
-    socket.on('vitals-complete', (data) => {
+    socket.on("vitals-complete", (data) => {
       if (!isMountedRef.current) return;
 
-      setStatus('Complete');
+      setStatus("Complete");
 
       if (data?.avg_bpm !== undefined) {
-        localStorage.setItem('avg_bpm', String(data.avg_bpm));
+        localStorage.setItem("avg_bpm", String(data.avg_bpm));
         setBpm(Number.parseFloat(data.avg_bpm) || 0);
       }
 
       if (data?.temp !== undefined) {
-        localStorage.setItem('temp', String(data.temp));
+        localStorage.setItem("temp", String(data.temp));
         const tempValue = Number.parseFloat(data.temp);
-        setDisplayTemp(Number.isNaN(tempValue) ? '--' : tempValue.toFixed(1));
+        setDisplayTemp(Number.isNaN(tempValue) ? "--" : tempValue.toFixed(1));
       }
 
       // Open success modal
@@ -146,21 +147,22 @@ export default function Vitals() {
 
       // Navigate to triage after showing the modal
       setTimeout(() => {
-        navigate('/triage');
+        navigate("/triage");
       }, 2000);
     });
 
     return () => {
-      console.log('🔌 Component unmounting - cleaning up');
+      console.log("🔌 Component unmounting - cleaning up");
       isMountedRef.current = false;
-      
+
       // Stop scanning
       if (scanStartedRef.current) {
-        fetch(`${API_URL}/api/scan/stop`, { method: 'POST' })
-          .catch(err => console.error('Error stopping scan:', err));
+        fetch(`${API_URL}/api/scan/stop`, { method: "POST" }).catch((err) =>
+          console.error("Error stopping scan:", err),
+        );
         scanStartedRef.current = false;
       }
-      
+
       // Disconnect socket
       socket.removeAllListeners();
       socket.disconnect();
@@ -177,12 +179,7 @@ export default function Vitals() {
       overflow="hidden"
     >
       {/* Hello Name - Top Left */}
-      <Box
-        position="absolute"
-        left="38px"
-        top="37px"
-        width="270px"
-      >
+      <Box position="absolute" left="38px" top="37px" width="270px">
         <Text
           fontSize="36px"
           fontWeight="600"
@@ -194,10 +191,7 @@ export default function Vitals() {
         </Text>
       </Box>
 
-      {/* Emergency Button */}
-      <EmergencyButton onClick={() => console.log('Emergency triggered')} />
-
-      {/* Title - Center Top */}
+     
       <Box
         position="absolute"
         left="50%"
@@ -273,9 +267,18 @@ export default function Vitals() {
           height="100%"
         >
           {/* Heart Icon */}
-          <GridItem display="flex" alignItems="center" justifyContent="center">
+          <GridItem
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            paddingTop="12px"
+          >
             <Box width="90px" height="90px">
-              <img src={heartPulseIcon} alt="Heart" style={{ width: '100%', height: '100%' }} />
+              <img
+                src={heartPulseIcon}
+                alt="Heart"
+                style={{ width: "100%", height: "100%" }}
+              />
             </Box>
           </GridItem>
 
@@ -283,8 +286,8 @@ export default function Vitals() {
           <GridItem display="flex" alignItems="center" justifyContent="center">
             <Text
               fontSize="32px"
-              fontWeight="600"
-              fontFamily="'Inter', sans-serif"
+              fontWeight="700"
+              fontFamily="'Arimo', sans-serif"
               color="#7f8c8d"
               textAlign="center"
               lineHeight="normal"
@@ -297,13 +300,13 @@ export default function Vitals() {
           <GridItem display="flex" alignItems="center" justifyContent="center">
             <Text
               fontSize="112px"
-              fontWeight="600"
-              fontFamily="'Poppins', sans-serif"
+              fontWeight="700"
+              fontFamily="'Arimo', sans-serif"
               color="#eb3223"
               textAlign="center"
               lineHeight="normal"
             >
-              {Number.isNaN(bpm) ? '--' : Math.round(bpm).toString()}
+              {Number.isNaN(bpm) ? "--" : Math.round(bpm).toString()}
             </Text>
           </GridItem>
 
@@ -344,9 +347,18 @@ export default function Vitals() {
           height="100%"
         >
           {/* Temperature Icon */}
-          <GridItem display="flex" alignItems="center" justifyContent="center">
+          <GridItem
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            paddingTop="12px"
+          >
             <Box width="90px" height="90px">
-              <img src={temperatureIcon} alt="Temperature" style={{ width: '100%', height: '100%' }} />
+              <img
+                src={temperatureIcon}
+                alt="Temperature"
+                style={{ width: "100%", height: "100%" }}
+              />
             </Box>
           </GridItem>
 
@@ -354,8 +366,8 @@ export default function Vitals() {
           <GridItem display="flex" alignItems="center" justifyContent="center">
             <Text
               fontSize="32px"
-              fontWeight="600"
-              fontFamily="'Inter', sans-serif"
+              fontWeight="700"
+              fontFamily="'Arimo', sans-serif"
               color="#7f8c8d"
               textAlign="center"
               lineHeight="normal"
@@ -368,8 +380,8 @@ export default function Vitals() {
           <GridItem display="flex" alignItems="center" justifyContent="center">
             <Text
               fontSize="96px"
-              fontWeight="600"
-              fontFamily="'Poppins', sans-serif"
+              fontWeight="700"
+              fontFamily="'Arimo', sans-serif"
               color="#3b82f6"
               textAlign="center"
               lineHeight="normal"
@@ -399,7 +411,7 @@ export default function Vitals() {
         position="absolute"
         left="50%"
         top="50%"
-        transform="translate(-50%, calc(-50% + 308.5px))"
+        transform="translate(-50%, calc(-50% + 330px))"
         fontSize="16px"
         fontWeight="500"
         fontFamily="'Inter', sans-serif"
@@ -412,16 +424,13 @@ export default function Vitals() {
       </Text>
 
       {/* Success Modal */}
-      <Dialog.Root 
-        open={isModalOpen} 
+      <Dialog.Root
+        open={isModalOpen}
         onOpenChange={(e) => setIsModalOpen(e.open)}
         placement="center"
         closeOnInteractOutside={false}
       >
-        <Dialog.Backdrop 
-          bg="rgba(0,0,0,0.5)" 
-          backdropFilter="blur(4px)"
-        />
+        <Dialog.Backdrop bg="rgba(0,0,0,0.5)" backdropFilter="blur(4px)" />
         <Dialog.Positioner
           position="fixed"
           top="50%"
@@ -447,18 +456,14 @@ export default function Vitals() {
               <Box
                 animation="scaleIn 0.5s ease-out"
                 css={{
-                  '@keyframes scaleIn': {
-                    '0%': { transform: 'scale(0)', opacity: 0 },
-                    '50%': { transform: 'scale(1.2)', opacity: 1 },
-                    '100%': { transform: 'scale(1)', opacity: 1 }
-                  }
+                  "@keyframes scaleIn": {
+                    "0%": { transform: "scale(0)", opacity: 0 },
+                    "50%": { transform: "scale(1.2)", opacity: 1 },
+                    "100%": { transform: "scale(1)", opacity: 1 },
+                  },
                 }}
               >
-                <CheckCircle 
-                  size={72} 
-                  color="#10b981"
-                  strokeWidth={2.5}
-                />
+                <CheckCircle size={72} color="#10b981" strokeWidth={2.5} />
               </Box>
 
               {/* Success Message */}

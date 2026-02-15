@@ -220,8 +220,8 @@ export default function Home() {
         <Box textAlign="center" marginTop="6px" padding="10px">
           <Text
             fontSize="24px"
-            fontWeight="300"
-            fontFamily="'Inter', sans-serif"
+            fontWeight="400"
+            fontFamily="'Arimo', sans-serif"
             color="#6b7280"
             lineHeight="32px"
           >
