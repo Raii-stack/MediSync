@@ -13,7 +13,7 @@ export function RecommendationScreen() {
           <div className="text-center mb-6">
             <div className="inline-flex items-center gap-3 bg-white/80 backdrop-blur-sm px-6 py-2 rounded-full shadow-lg mb-3">
               <Activity className="w-4 h-4 text-[#2ECC71]" />
-              <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">Treatment Plan</span>
+              <span className="text-sm font-medium text-gray-600 uppercase tracking-wide">Treatment Plan</span>
             </div>
             <h1 className="text-4xl font-bold text-gray-800">Recommended Treatment</h1>
           </div>

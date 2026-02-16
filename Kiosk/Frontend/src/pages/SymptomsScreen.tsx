@@ -45,12 +45,12 @@ export function SymptomsScreen() {
 
   return (
     <KioskLayout>
-      <div className="flex flex-col items-center w-full max-w-6xl mx-auto h-full justify-center py-4">
+      <div className="mt-15 flex flex-col items-center w-full max-w-6xl mx-auto h-full justify-center py-4">
         {/* Title */}
         <div className="text-center mb-6">
           <div className="inline-flex items-center gap-3 bg-white/80 backdrop-blur-sm px-6 py-2 rounded-full shadow-lg mb-3">
             <Activity className="w-4 h-4 text-[#4A90E2]" />
-            <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">Symptom Assessment</span>
+            <span className="text-sm font-medium text-gray-600 uppercase tracking-wide">Symptom Assessment</span>
           </div>
           <h1 className="text-4xl font-bold text-gray-800">How are you feeling?</h1>
         </div>
@@ -115,7 +115,7 @@ export function SymptomsScreen() {
             </div>
 
             {/* Symptoms Grid */}
-            <div className="grid grid-cols-3 gap-x-2 gap-y-2 mb-4 flex-1">
+            <div className="grid grid-cols-4 gap-x-3 gap-y-3 mb-4">
               {symptoms.map((symptom) => {
                 const isSelected = selectedSymptoms.includes(symptom.id);
                 return (
@@ -134,7 +134,7 @@ export function SymptomsScreen() {
                       </div>
                     )}
                     <span className="text-5xl">{symptom.emoji}</span>
-                    <span className={`text-xs font-semibold text-center leading-tight px-1 mt-2 ${isSelected ? 'text-[#4A90E2]' : 'text-gray-600'}`}>
+                    <span className={`text-sm font-semibold text-center leading-tight px-1 mt-2 ${isSelected ? 'text-[#4A90E2]' : 'text-gray-600'}`}>
                       {symptom.label}
                     </span>
                   </button>

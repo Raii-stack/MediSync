@@ -1,10 +1,10 @@
-const { createClient } = require('@supabase/supabase-js');
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-require('dotenv').config(); // Load .env file
+const { createClient } = require("@supabase/supabase-js");
+const sqlite3 = require("sqlite3").verbose();
+const path = require("path");
+require("dotenv").config(); // Load .env file
 
 // Open local SQLite database
-const dbPath = process.env.DB_PATH || path.join(__dirname, 'kiosk.db');
+const dbPath = process.env.DB_PATH || path.join(__dirname, "kiosk.db");
 let db = null;
 
 function initializeDatabase() {
@@ -15,9 +15,9 @@ function initializeDatabase() {
         resolve(false);
         return;
       }
-      
+
       // Enable foreign keys
-      db.run('PRAGMA foreign_keys = ON', (err) => {
+      db.run("PRAGMA foreign_keys = ON", (err) => {
         if (err) {
           console.error("Error enabling foreign keys:", err.message);
           resolve(false);
@@ -35,15 +35,14 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  console.warn('⚠️  SUPABASE_URL or SUPABASE_ANON_KEY not found in .env');
-  console.warn('   Sync agent will run in offline mode. Syncing disabled.');
+  console.warn("⚠️  SUPABASE_URL or SUPABASE_ANON_KEY not found in .env");
+  console.warn("   Sync agent will run in offline mode. Syncing disabled.");
 }
 
-const supabase = supabaseUrl && supabaseKey 
-  ? createClient(supabaseUrl, supabaseKey)
-  : null;
+const supabase =
+  supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
-const KIOSK_ID = process.env.KIOSK_ID || 'kiosk-001';
+const KIOSK_ID = process.env.KIOSK_ID || "kiosk-001";
 const SYNC_INTERVAL = (process.env.SYNC_INTERVAL || 60) * 1000; // Default 60 seconds
 
 // ============================================================================
@@ -52,12 +51,14 @@ const SYNC_INTERVAL = (process.env.SYNC_INTERVAL || 60) * 1000; // Default 60 se
 
 async function syncData() {
   if (!supabase) {
-    console.log('[SYNC] Supabase not configured. Skipping sync.');
+    console.log("[SYNC] Supabase not configured. Skipping sync.");
     return;
   }
 
   try {
-    console.log(`\n[SYNC] 🔄 Starting sync cycle at ${new Date().toLocaleTimeString()}...`);
+    console.log(
+      `\n[SYNC] 🔄 Starting sync cycle at ${new Date().toLocaleTimeString()}...`,
+    );
 
     // =====================================================================
     // STEP 0: ENSURE KIOSK RECORD EXISTS IN CLOUD
@@ -84,9 +85,9 @@ async function syncData() {
     // =====================================================================
     await syncInventory();
 
-    console.log('[SYNC] ✅ Sync cycle complete.\n');
+    console.log("[SYNC] ✅ Sync cycle complete.\n");
   } catch (err) {
-    console.error('[SYNC] ❌ Sync error:', err.message);
+    console.error("[SYNC] ❌ Sync error:", err.message);
   }
 }
 
@@ -96,45 +97,43 @@ async function syncData() {
 async function ensureKioskExists() {
   return new Promise(async (resolve) => {
     try {
-      console.log('[SYNC-0] 🔍 Checking if kiosk record exists...');
+      console.log("[SYNC-0] 🔍 Checking if kiosk record exists...");
 
       // Check if kiosk exists in cloud
       const { data, error } = await supabase
-        .from('kiosks')
-        .select('*')
-        .eq('kiosk_id', KIOSK_ID)
+        .from("kiosks")
+        .select("*")
+        .eq("kiosk_id", KIOSK_ID)
         .single();
 
-      if (error && error.code !== 'PGRST116') {
+      if (error && error.code !== "PGRST116") {
         // PGRST116 means no rows found, which is expected
-        console.error('[SYNC-0] Error checking kiosk:', error.message);
+        console.error("[SYNC-0] Error checking kiosk:", error.message);
         return resolve();
       }
 
       if (data) {
-        console.log('[SYNC-0] ✓ Kiosk record already exists.');
+        console.log("[SYNC-0] ✓ Kiosk record already exists.");
         return resolve();
       }
 
       // Kiosk doesn't exist, create it
-      console.log('[SYNC-0] 📝 Creating kiosk record...');
-      const { error: insertError } = await supabase
-        .from('kiosks')
-        .insert({
-          kiosk_id: KIOSK_ID,
-          room_assigned: process.env.ROOM_ASSIGNED || 'Room TBD',
-          status: 'Online'
-        });
+      console.log("[SYNC-0] 📝 Creating kiosk record...");
+      const { error: insertError } = await supabase.from("kiosks").insert({
+        kiosk_id: KIOSK_ID,
+        room_assigned: process.env.ROOM_ASSIGNED || "Room TBD",
+        status: "Online",
+      });
 
       if (insertError) {
-        console.error('[SYNC-0] Failed to create kiosk:', insertError.message);
+        console.error("[SYNC-0] Failed to create kiosk:", insertError.message);
         return resolve();
       }
 
-      console.log('[SYNC-0] ✅ Kiosk record created successfully.');
+      console.log("[SYNC-0] ✅ Kiosk record created successfully.");
       resolve();
     } catch (err) {
-      console.error('[SYNC-0] Error:', err.message);
+      console.error("[SYNC-0] Error:", err.message);
       resolve();
     }
   });
@@ -146,61 +145,82 @@ async function ensureKioskExists() {
 async function pullStudents() {
   return new Promise((resolve, reject) => {
     try {
-      console.log('[SYNC-A] 📥 Pulling students from cloud...');
+      console.log("[SYNC-A] 📥 Pulling students from cloud...");
 
       supabase
-        .from('students')
-        .select('*')
+        .from("students")
+        .select("*")
         .then(({ data, error }) => {
           if (error) {
-            console.error('[SYNC-A] Supabase error:', error.message);
+            console.error("[SYNC-A] Supabase error:", error.message);
             return resolve();
           }
 
           if (!data || data.length === 0) {
-            console.log('[SYNC-A] ✓ No students to sync.');
+            console.log("[SYNC-A] ✓ No students to sync.");
             return resolve();
           }
 
-          console.log(`[SYNC-A] 📥 Found ${data.length} student(s). Updating local cache...`);
+          console.log(
+            `[SYNC-A] 📥 Found ${data.length} student(s). Updating local cache...`,
+          );
 
-          // Clear and repopulate students_cache
-          db.run('DELETE FROM students_cache', (err) => {
+          // Use INSERT OR REPLACE to preserve cached RFID UIDs and update with real data
+          const stmt = db.prepare(`
+            INSERT OR REPLACE INTO students_cache 
+            (student_id, student_uuid, rfid_uid, first_name, last_name, section, medical_flags)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `);
+
+          let matched = 0;
+          let added = 0;
+
+          data.forEach((student) => {
+            // Check if this student matches any cached RFID UID
+            db.get(
+              'SELECT student_id FROM students_cache WHERE rfid_uid = ? AND student_id LIKE "UNCACHED_%"',
+              [student.rfid_uid],
+              (err, row) => {
+                if (!err && row) {
+                  console.log(
+                    `[SYNC-A] 🔗 Matched cached RFID ${student.rfid_uid} with ${student.first_name} ${student.last_name}`,
+                  );
+                  matched++;
+                } else {
+                  added++;
+                }
+              },
+            );
+
+            stmt.run(
+              student.student_id,
+              student.id, // Store the UUID
+              student.rfid_uid,
+              student.first_name,
+              student.last_name,
+              student.section || "",
+              "", // medical_flags - can be populated from medical_history later
+            );
+          });
+
+          stmt.finalize((err) => {
             if (err) {
-              console.error('[SYNC-A] Failed to clear cache:', err.message);
-              return resolve();
-            }
-
-            const stmt = db.prepare(`
-              INSERT INTO students_cache 
-              (student_id, student_uuid, rfid_uid, first_name, last_name, section, medical_flags)
-              VALUES (?, ?, ?, ?, ?, ?, ?)
-            `);
-
-            data.forEach((student) => {
-              stmt.run(
-                student.student_id,
-                student.id,  // Store the UUID
-                student.rfid_uid,
-                student.first_name,
-                student.last_name,
-                student.section || '',
-                '' // medical_flags - can be populated from medical_history later
+              console.error("[SYNC-A] Failed to update students:", err.message);
+            } else {
+              console.log(
+                `[SYNC-A] ✅ Updated ${data.length} student(s) in local cache.`,
               );
-            });
-
-            stmt.finalize((err) => {
-              if (err) {
-                console.error('[SYNC-A] Failed to insert students:', err.message);
-              } else {
-                console.log(`[SYNC-A] ✅ Updated ${data.length} student(s) in local cache.`);
+              if (matched > 0) {
+                console.log(
+                  `[SYNC-A] 🔗 Matched ${matched} previously cached RFID(s) with student data.`,
+                );
               }
-              resolve();
-            });
+            }
+            resolve();
           });
         });
     } catch (err) {
-      console.error('[SYNC-A] Error:', err.message);
+      console.error("[SYNC-A] Error:", err.message);
       resolve();
     }
   });
@@ -212,7 +232,8 @@ async function pullStudents() {
 async function pushKioskLogs() {
   return new Promise((resolve, reject) => {
     // Query logs with student UUID from cache
-    db.all(`
+    db.all(
+      `
       SELECT 
         kl.*,
         COALESCE(sc.student_uuid, NULL) as student_uuid
@@ -223,57 +244,60 @@ async function pushKioskLogs() {
     `,
       async (err, rows) => {
         if (err) {
-          console.error('[SYNC-B] Database error:', err.message);
+          console.error("[SYNC-B] Database error:", err.message);
           return resolve();
         }
 
         if (rows.length === 0) {
-          console.log('[SYNC-B] ✓ No kiosk logs to sync.');
+          console.log("[SYNC-B] ✓ No kiosk logs to sync.");
           return resolve();
         }
 
-        console.log(`[SYNC-B] 📤 Found ${rows.length} unsynced log(s). Pushing to cloud...`);
+        console.log(
+          `[SYNC-B] 📤 Found ${rows.length} unsynced log(s). Pushing to cloud...`,
+        );
 
         try {
           // Transform local kiosk_logs for Supabase
           const logsToSync = rows.map((row) => ({
             kiosk_id: KIOSK_ID,
-            student_id: row.student_uuid,  // Use UUID from students_cache
-            symptoms_reported: row.symptoms ? row.symptoms.split(',').map(s => s.trim()) : [],
+            student_id: row.student_uuid, // Use UUID from students_cache
+            symptoms_reported: row.symptoms
+              ? row.symptoms.split(",").map((s) => s.trim())
+              : [],
             pain_scale: row.pain_scale,
             temp_reading: row.temp_reading,
             heart_rate_bpm: row.heart_rate,
             medicine_dispensed: row.medicine_dispensed,
-            created_at: row.created_at
+            created_at: row.created_at,
           }));
 
           // Insert into Supabase
           const { error } = await supabase
-            .from('kiosk_logs')
+            .from("kiosk_logs")
             .insert(logsToSync);
 
           if (error) {
-            console.error('[SYNC-B] Supabase error:', error.message);
+            console.error("[SYNC-B] Supabase error:", error.message);
             return resolve();
           }
 
           // Mark all as synced in local database
-          db.run(
-            "UPDATE kiosk_logs SET synced = 1 WHERE synced = 0",
-            (err) => {
-              if (err) {
-                console.error('[SYNC-B] Failed to mark as synced:', err.message);
-              } else {
-                console.log(`[SYNC-B] ✅ Marked ${rows.length} log(s) as synced.`);
-              }
-              resolve();
+          db.run("UPDATE kiosk_logs SET synced = 1 WHERE synced = 0", (err) => {
+            if (err) {
+              console.error("[SYNC-B] Failed to mark as synced:", err.message);
+            } else {
+              console.log(
+                `[SYNC-B] ✅ Marked ${rows.length} log(s) as synced.`,
+              );
             }
-          );
+            resolve();
+          });
         } catch (err) {
-          console.error('[SYNC-B] Error:', err.message);
+          console.error("[SYNC-B] Error:", err.message);
           resolve();
         }
-      }
+      },
     );
   });
 }
@@ -284,7 +308,8 @@ async function pushKioskLogs() {
 async function pushEmergencyAlerts() {
   return new Promise((resolve, reject) => {
     // Query alerts with student UUID from cache
-    db.all(`
+    db.all(
+      `
       SELECT 
         ea.*,
         COALESCE(sc.student_uuid, NULL) as student_uuid
@@ -295,32 +320,34 @@ async function pushEmergencyAlerts() {
     `,
       async (err, rows) => {
         if (err) {
-          console.error('[SYNC-C] Database error:', err.message);
+          console.error("[SYNC-C] Database error:", err.message);
           return resolve();
         }
 
         if (rows.length === 0) {
-          console.log('[SYNC-C] ✓ No emergency alerts to sync.');
+          console.log("[SYNC-C] ✓ No emergency alerts to sync.");
           return resolve();
         }
 
-        console.log(`[SYNC-C] 🚨 Found ${rows.length} alert(s). Pushing to cloud...`);
+        console.log(
+          `[SYNC-C] 🚨 Found ${rows.length} alert(s). Pushing to cloud...`,
+        );
 
         try {
           const alertsToSync = rows.map((row) => ({
             kiosk_id: KIOSK_ID,
-            student_id: row.student_uuid,  // Use UUID from students_cache
+            student_id: row.student_uuid, // Use UUID from students_cache
             alert_message: `Emergency alert from kiosk`,
-            alert_status: row.status || 'PENDING',
-            created_at: row.created_at
+            alert_status: row.status || "PENDING",
+            created_at: row.created_at,
           }));
 
           const { error } = await supabase
-            .from('emergency_alerts')
+            .from("emergency_alerts")
             .insert(alertsToSync);
 
           if (error) {
-            console.error('[SYNC-C] Supabase error:', error.message);
+            console.error("[SYNC-C] Supabase error:", error.message);
             return resolve();
           }
 
@@ -328,18 +355,23 @@ async function pushEmergencyAlerts() {
             "UPDATE emergency_alerts SET synced = 1 WHERE synced = 0",
             (err) => {
               if (err) {
-                console.error('[SYNC-C] Failed to mark as synced:', err.message);
+                console.error(
+                  "[SYNC-C] Failed to mark as synced:",
+                  err.message,
+                );
               } else {
-                console.log(`[SYNC-C] ✅ Marked ${rows.length} alert(s) as synced.`);
+                console.log(
+                  `[SYNC-C] ✅ Marked ${rows.length} alert(s) as synced.`,
+                );
               }
               resolve();
-            }
+            },
           );
         } catch (err) {
-          console.error('[SYNC-C] Error:', err.message);
+          console.error("[SYNC-C] Error:", err.message);
           resolve();
         }
-      }
+      },
     );
   });
 }
@@ -350,66 +382,76 @@ async function pushEmergencyAlerts() {
 // ============================================================================
 async function syncInventory() {
   return new Promise((resolve, reject) => {
-    db.all(`
+    db.all(
+      `
       SELECT 
         ks.slot_id,
         ks.medicine_name,
         ks.current_stock,
         ks.max_stock
       FROM kiosk_slots ks
-    `, async (err, rows) => {
-      if (err) {
-        console.error('[SYNC-D] Database error:', err.message);
-        return resolve();
-      }
-
-      if (rows.length === 0) {
-        console.log('[SYNC-D] ✓ No slots to sync.');
-        return resolve();
-      }
-
-      console.log(`[SYNC-D] 📦 Pushing ${rows.length} slot(s) to cloud (Local → Cloud)...`);
-
-      try {
-        // Build payload from local data — exact values, no defaults
-        const payload = rows.map(slot => ({
-          kiosk_id: KIOSK_ID,
-          slot_id: slot.slot_id,
-          medicine_name: slot.medicine_name,
-          current_stock: slot.current_stock,
-          last_synced: new Date().toISOString()
-        }));
-
-        // Upsert all slots in one call using composite key
-        const { error } = await supabase
-          .from('kiosk_inventory')
-          .upsert(payload, { onConflict: 'kiosk_id, slot_id' });
-
-        if (error) {
-          console.error('[SYNC-D] Supabase upsert error:', error.message);
-        } else {
-          rows.forEach(slot => {
-            console.log(`[SYNC-D] ✅ Synced Slot ${slot.slot_id}: ${slot.medicine_name} (Stock: ${slot.current_stock})`);
-          });
+    `,
+      async (err, rows) => {
+        if (err) {
+          console.error("[SYNC-D] Database error:", err.message);
+          return resolve();
         }
 
-        // Mark slots as synced locally
-        db.run(
-          "UPDATE kiosk_slots SET synced = 1 WHERE synced = 0",
-          (err) => {
-            if (err) {
-              console.error('[SYNC-D] Failed to mark slots as synced:', err.message);
-            } else {
-              console.log('[SYNC-D] ✅ Marked all slots as synced');
-            }
-            resolve();
-          }
+        if (rows.length === 0) {
+          console.log("[SYNC-D] ✓ No slots to sync.");
+          return resolve();
+        }
+
+        console.log(
+          `[SYNC-D] 📦 Pushing ${rows.length} slot(s) to cloud (Local → Cloud)...`,
         );
-      } catch (err) {
-        console.error('[SYNC-D] Error:', err.message);
-        resolve();
-      }
-    });
+
+        try {
+          // Build payload from local data — exact values, no defaults
+          const payload = rows.map((slot) => ({
+            kiosk_id: KIOSK_ID,
+            slot_id: slot.slot_id,
+            medicine_name: slot.medicine_name,
+            current_stock: slot.current_stock,
+            last_synced: new Date().toISOString(),
+          }));
+
+          // Upsert all slots in one call using composite key
+          const { error } = await supabase
+            .from("kiosk_inventory")
+            .upsert(payload, { onConflict: "kiosk_id, slot_id" });
+
+          if (error) {
+            console.error("[SYNC-D] Supabase upsert error:", error.message);
+          } else {
+            rows.forEach((slot) => {
+              console.log(
+                `[SYNC-D] ✅ Synced Slot ${slot.slot_id}: ${slot.medicine_name} (Stock: ${slot.current_stock})`,
+              );
+            });
+          }
+
+          // Mark slots as synced locally
+          db.run(
+            "UPDATE kiosk_slots SET synced = 1 WHERE synced = 0",
+            (err) => {
+              if (err) {
+                console.error(
+                  "[SYNC-D] Failed to mark slots as synced:",
+                  err.message,
+                );
+              } else {
+                console.log("[SYNC-D] ✅ Marked all slots as synced");
+              }
+              resolve();
+            },
+          );
+        } catch (err) {
+          console.error("[SYNC-D] Error:", err.message);
+          resolve();
+        }
+      },
+    );
   });
 }
 
@@ -424,15 +466,15 @@ async function syncInventory() {
 
   // Initialize database first
   const dbReady = await initializeDatabase();
-  
+
   if (!dbReady) {
-    console.error('❌ Failed to initialize local database. Exiting.');
+    console.error("❌ Failed to initialize local database. Exiting.");
     process.exit(1);
   }
 
   console.log(`  Syncing every ${SYNC_INTERVAL / 1000} seconds`);
   console.log(`  Kiosk ID: ${KIOSK_ID}`);
-  console.log(`  Supabase: ${supabase ? '✅ Connected' : '⚠️  Offline Mode'}`);
+  console.log(`  Supabase: ${supabase ? "✅ Connected" : "⚠️  Offline Mode"}`);
   console.log(`============================================\n`);
 
   // Run sync immediately on startup, then every SYNC_INTERVAL
@@ -440,8 +482,8 @@ async function syncInventory() {
   setInterval(syncData, SYNC_INTERVAL);
 
   // Handle graceful shutdown
-  process.on('SIGINT', () => {
-    console.log('\n[SYNC] 🛑 Shutting down sync agent...');
+  process.on("SIGINT", () => {
+    console.log("\n[SYNC] 🛑 Shutting down sync agent...");
     if (db) db.close();
     process.exit(0);
   });

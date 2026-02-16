@@ -1,6 +1,8 @@
-import { ReactNode, useState } from 'react';
-import { EmergencyButton } from './EmergencyButton';
-import { EmergencyModal } from './EmergencyModal';
+import { ReactNode, useState } from "react";
+import axios from "axios";
+import { API_BASE_URL } from "../config/api";
+import { EmergencyButton } from "./EmergencyButton";
+import { EmergencyModal } from "./EmergencyModal";
 
 interface KioskLayoutProps {
   children: ReactNode;
@@ -9,17 +11,45 @@ interface KioskLayoutProps {
   showVersion?: boolean;
 }
 
-export function KioskLayout({ children, showEmergency = true, greeting, showVersion = false }: KioskLayoutProps) {
+export function KioskLayout({
+  children,
+  showEmergency = true,
+  greeting,
+  showVersion = false,
+}: KioskLayoutProps) {
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
 
   const handleEmergencyClick = () => {
     setIsEmergencyModalOpen(true);
   };
 
-  const handleEmergencyConfirm = () => {
+  const handleEmergencyConfirm = async () => {
     setIsEmergencyModalOpen(false);
-    // TODO: Implement actual emergency contact logic here
-    alert('Emergency services contacted!');
+
+    try {
+      // Get current student_id from session storage if available
+      const currentStudent = sessionStorage.getItem("currentStudent");
+      const studentData = currentStudent ? JSON.parse(currentStudent) : null;
+      const student_id = studentData?.student_id || null;
+
+      console.log("🚨 Sending emergency alert to backend...");
+      const response = await axios.post(`${API_BASE_URL}/api/emergency`, {
+        student_id,
+      });
+
+      if (response.data.success) {
+        console.log("✅ Emergency alert sent successfully");
+        // Show success message (could replace with toast notification)
+        alert(
+          "✅ Emergency Alert Sent!\n\nThe school clinic has been notified and will respond shortly.",
+        );
+      }
+    } catch (error) {
+      console.error("❌ Failed to send emergency alert:", error);
+      alert(
+        "⚠️ Failed to send alert. Please contact clinic directly or try again.",
+      );
+    }
   };
 
   const handleEmergencyCancel = () => {

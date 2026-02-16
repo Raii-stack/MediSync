@@ -1,9 +1,43 @@
-import { Building2, CreditCard, Sparkles } from 'lucide-react';
-import { useNavigate } from 'react-router';
-import { KioskLayout } from '../components/KioskLayout';
+import { Building2, Sparkles } from "lucide-react";
+import { useNavigate } from "react-router";
+import { KioskLayout } from "../components/KioskLayout";
+import { useSocket } from "../contexts/SocketContext";
+import { useEffect, useState } from "react";
 
 export function WelcomeScreen() {
   const navigate = useNavigate();
+  const { socket, isConnected } = useSocket();
+
+  useEffect(() => {
+    if (!socket) return;
+
+    // Listen for RFID scan events from the backend
+    const handleRfidScan = (data: { student: any; uid: string }) => {
+      console.log("📡 RFID Scan received:", data);
+
+      // Store student data in sessionStorage for use in other screens
+      if (data.student) {
+        sessionStorage.setItem("currentStudent", JSON.stringify(data.student));
+        sessionStorage.setItem(
+          "studentName",
+          `${data.student.first_name} ${data.student.last_name}`,
+        );
+      } else {
+        // Guest user
+        sessionStorage.setItem("studentName", "Guest");
+      }
+
+      // Navigate to vitals screen
+      navigate("/vitals");
+    };
+
+    socket.on("rfid-scan", handleRfidScan);
+
+    // Cleanup listener on unmount
+    return () => {
+      socket.off("rfid-scan", handleRfidScan);
+    };
+  }, [socket, navigate]);
 
   return (
     <KioskLayout showVersion={true}>
@@ -18,7 +52,7 @@ export function WelcomeScreen() {
 
         {/* Welcome Text */}
         <h1 className="text-6xl font-bold text-gray-800 mb-4 text-center tracking-tight animate-fade-in-up animation-delay-200">
-          Welcome to{' '}
+          Welcome to{" "}
           <span className="bg-gradient-to-r from-[#4A90E2] to-[#357ABD] bg-clip-text text-transparent animate-gradient">
             MediSync
           </span>
@@ -35,15 +69,24 @@ export function WelcomeScreen() {
           </p>
         </div>
 
-        {/* Tap ID Button */}
-        <button
-          onClick={() => navigate('/vitals')}
-          className="group bg-gradient-to-r from-[#4A90E2] to-[#357ABD] hover:from-[#357ABD] hover:to-[#2868A8] text-white px-38 py-6 rounded-2xl shadow-2xl transition-all hover:scale-105 hover:shadow-3xl active:scale-95 flex items-center gap-4 text-xl font-semibold relative overflow-hidden animate-fade-in-up animation-delay-800"
-        >
-          <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-          <CreditCard className="w-7 h-7 relative z-10 group-hover:rotate-6 transition-transform" />
-          <span className="relative z-10">Tap ID Card</span>
-        </button>
+        {/* Connection Status */}
+        {!isConnected ? (
+          <div className="w-[450px] justify-center bg-orange-100 border-2 border-orange-300 text-orange-700 py-6 rounded-2xl shadow-2xl flex items-center gap-4 text-xl font-semibold animate-fade-in-up animation-delay-800">
+            <div className="w-7 h-7 relative">
+              <div className="absolute inset-0 rounded-full bg-orange-500 animate-ping opacity-75"></div>
+              <div className="relative rounded-full w-7 h-7 bg-orange-600"></div>
+            </div>
+            <span>Connecting to kiosk hardware...</span>
+          </div>
+        ) : (
+          <div className="w-[450px] justify-center bg-blue-100 border-2 border-blue-300 text-blue-700 py-6 rounded-2xl shadow-2xl flex items-center gap-4 text-xl font-semibold animate-fade-in-up animation-delay-800 animate-pulse">
+            <div className="w-7 h-7 relative">
+              <div className="absolute inset-0 rounded-full bg-blue-500 animate-ping opacity-75"></div>
+              <div className="relative rounded-full w-7 h-7 bg-blue-600"></div>
+            </div>
+            <span>Waiting for card scan...</span>
+          </div>
+        )}
 
         {/* Decorative elements */}
         <div className="absolute top-1/4 left-1/4 w-72 h-72 bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
