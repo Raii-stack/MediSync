@@ -156,7 +156,25 @@ module.exports = {
           if (parsed.event === "rfid_scan") {
             const uid = parsed.uid;
             console.log(`[HARDWARE] 🔖 RFID Scanned: ${uid}`);
+            // Auto-enable scanning since ESP32 starts vitals immediately after RFID
+            isScanning = true;
             callback({ type: "login", uid });
+            return;
+          }
+
+          if (parsed.event === "vitals_progress") {
+            if (!isScanning) return;
+            console.log(
+              `[HARDWARE] 📊 Vitals progress: ${parsed.temperature}°C, ${parsed.heartRate} BPM, ${(parsed.progress * 100).toFixed(0)}%`,
+            );
+            callback({
+              type: "vitals",
+              data: {
+                temp: parsed.temperature,
+                bpm: parsed.heartRate,
+                progress: parsed.progress,
+              },
+            });
             return;
           }
 
@@ -165,8 +183,22 @@ module.exports = {
             console.log(
               `[HARDWARE] ❤️  Vitals: ${parsed.temperature}°C, ${parsed.heartRate} BPM`,
             );
+            // Send as progress update first with 100% progress
             callback({
               type: "vitals",
+              data: {
+                temp: parsed.temperature,
+                bpm: parsed.heartRate,
+                progress: parsed.progress || 1.0, // ESP32 sends 1.0, ensure frontend shows 100%
+              },
+            });
+            // ESP32 sends vitals_data as final averaged result - signal completion
+            console.log(
+              "[HARDWARE] ✅ ESP32 vitals reading complete, signaling completion",
+            );
+            isScanning = false;
+            callback({
+              type: "vitals_complete",
               data: {
                 temp: parsed.temperature,
                 bpm: parsed.heartRate,
@@ -263,17 +295,21 @@ module.exports = {
       !!globalCallback,
     );
     isScanning = true;
-    startAutoStopTimer();
     // ESP32 automatically reads vitals after RFID scan - no wake command needed
     if (!isSimulationMode && port && port.isOpen) {
-      console.log(
-        "✅ [HARDWARE] ESP32 is reading vitals (triggered by RFID scan)",
-      );
-      // No command needed - ESP32 auto-starts after RFID
+      console.log("✅ [HARDWARE] Sending start_vitals to ESP32");
+      // Send start_vitals command to ESP32 so it enters READING_VITALS state
+      // This ensures scanning works even if called independently of RFID
+      const command = JSON.stringify({ command: "start_vitals" });
+      port.write(`${command}\n`);
+      console.log(`📤 Sent to ESP32: ${command}`);
+      // No auto-stop timer for hardware - ESP32 manages its own scan duration
     } else {
       console.log(
         "[DEBUG] In simulation mode or no port. Starting simulation generator.",
       );
+      // Auto-stop timer only for simulation mode
+      startAutoStopTimer();
       if (globalCallback) {
         startSimulationGenerator(globalCallback);
       } else {
@@ -288,9 +324,8 @@ module.exports = {
     console.log("[DEBUG] stopScan called");
     isScanning = false;
     clearAutoStopTimer();
-    // ESP32 automatically stops after 5 seconds or when vitals complete
     if (!isSimulationMode && port && port.isOpen) {
-      console.log("✅ [HARDWARE] ESP32 will auto-stop after vitals complete");
+      console.log("✅ [HARDWARE] Sending reset to ESP32");
       // Send reset command to put ESP32 back to IDLE state
       const command = JSON.stringify({ command: "reset" });
       port.write(command + "\n");
@@ -379,5 +414,10 @@ module.exports = {
       console.log(`[SIM] 💡 Stop LED blinking in simulation mode`);
       return { success: true, mode: "simulation" };
     }
+  },
+
+  // Check if in simulation mode
+  isSimulation: () => {
+    return isSimulationMode;
   },
 };

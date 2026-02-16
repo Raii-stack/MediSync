@@ -17,9 +17,10 @@ Install these exact versions in Arduino IDE (Tools → Manage Libraries):
 ### Sensor Libraries
 
 2. **MFRC522** (RFID)
-   - Version: **1.4.11**
+   - Version: **1.4.10** (NOT 1.4.11 - has compile bug with ESP32)
    - Author: GithubCommunity
    - Library Manager: Search "MFRC522"
+   - **IMPORTANT**: If you already installed 1.4.11, uninstall it first!
 
 3. **Adafruit MLX90614** (Thermal Sensor)
    - Version: **1.0.1** or **2.1.3**
@@ -83,3 +84,35 @@ Install these exact versions in Arduino IDE (Tools → Manage Libraries):
 - ✅ **FIXED**: Use Serial (USB) for commands instead of Serial2
 - Verify baud rate: 115200 on both ESP32 and backend
 - Check USB cable quality (some charge-only cables don't support data)
+
+### MFRC522 Compilation Error (backLen > 0)
+
+If you see errors like `ordered comparison of pointer with integer zero`, manually fix:
+
+**File:** `C:\Users\gopio\OneDrive\Documents\Arduino\libraries\MFRC522\src\MFRC522Extended.cpp`
+
+**Line 824:** Change from:
+
+```cpp
+if (backData && (backLen > 0)) {
+```
+
+To:
+
+```cpp
+if (backData && backLen) {
+```
+
+**Line 847:** Change from:
+
+```cpp
+if (backData && (backLen > 0)) {
+```
+
+To:
+
+```cpp
+if (backData && backLen) {
+```
+
+Save the file and recompile.

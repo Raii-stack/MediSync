@@ -10,7 +10,6 @@ Sends a fake RFID scan command to your real ESP32 hardware to trigger the vitals
    - Now sends RFID data to RPI when card is scanned
    - Added handler for `simulate_rfid` command
    - Triggers full vitals reading cycle
-
 2. **Backend** (`serial.js`):
    - Added `sendFakeRFIDToESP32()` function
    - Sends JSON command to ESP32: `{"command":"simulate_rfid","uid":"..."}`

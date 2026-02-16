@@ -232,24 +232,53 @@ hardware.onData((event) => {
     vitalsSession.sampleCount++;
     vitalsSession.isScanning = true;
 
-    // Emit as vitals-progress for realtime updates
-    const progress = Math.min(10, vitalsSession.sampleCount / 5);
+    // Use progress from ESP32 if provided (hardware mode), otherwise calculate for simulation
+    // ESP32 sends progress as 0-1 (heartReadings/15), convert to 0-100 for frontend
+    let progress;
+    if (event.data.progress !== undefined) {
+      // Hardware mode: ESP32 sends 0-1.0, convert to 0-100
+      progress = Math.min(100, event.data.progress * 100);
+    } else {
+      // Simulation fallback: calculate based on sample count
+      progress = Math.min(100, vitalsSession.sampleCount * 10);
+    }
     io.emit("vitals-progress", {
       bpm: bpmValue,
       temp: tempValue,
       progress: progress,
     });
 
-    // Auto-complete after collecting enough samples (around 35 seconds worth)
-    // Simulation generates every 2 seconds, so ~17 samples
-    if (vitalsSession.sampleCount >= 17) {
+    // Auto-complete after collecting enough samples (SIMULATION MODE ONLY)
+    // In hardware mode, wait for ESP32's vitals_complete signal
+    if (hardware.isSimulation && hardware.isSimulation() && vitalsSession.sampleCount >= 17) {
       console.log(
-        "[VITALS] Auto-completing scan after collecting sufficient samples",
+        "[VITALS] [SIMULATION] Auto-completing scan after collecting sufficient samples",
       );
       hardware.stopScan();
       completeVitalsSession();
     }
 
+    return;
+  }
+
+  // Handle hardware vitals completion (ESP32 sends final averaged result)
+  if (event.type === "vitals_complete") {
+    console.log("[VITALS] ✅ Hardware vitals complete:", event.data);
+
+    const bpmValue = parseFloat(event.data.bpm);
+    const tempValue = parseFloat(event.data.temp);
+
+    // Add to session samples if not already added
+    if (!isNaN(bpmValue) && !vitalsSession.bpmSamples.includes(bpmValue)) {
+      vitalsSession.bpmSamples.push(bpmValue);
+    }
+    if (!isNaN(tempValue) && !vitalsSession.tempSamples.includes(tempValue)) {
+      vitalsSession.tempSamples.push(tempValue);
+    }
+    vitalsSession.isScanning = true;
+
+    // Complete the session immediately with the hardware's averaged data
+    completeVitalsSession();
     return;
   }
 
@@ -282,9 +311,9 @@ hardware.onData((event) => {
   }
 });
 
-// Register callback for when hardware auto-stops the scan
+// Register callback for when simulation auto-stops the scan
 hardware.onStop(() => {
-  console.log("[VITALS] Hardware auto-stop triggered, completing session");
+  console.log("[VITALS] Simulation auto-stop triggered, completing session");
   if (vitalsSession.isScanning) {
     completeVitalsSession();
   }
@@ -781,28 +810,33 @@ app.post("/api/debug/vitals", (req, res) => {
   console.log(`  BPM: ${simulatedBpm}, Temp: ${simulatedTemp}°C`);
 
   let sampleCount = 0;
+  const totalSamples = simulationDuration * 2; // 2 samples per second
   const interval = setInterval(() => {
     sampleCount++;
-    const progress = Math.min(10, sampleCount / 2);
+    // Progress 0-100 to match ESP32 flow
+    const progress = Math.min(
+      100,
+      Math.round((sampleCount / totalSamples) * 100),
+    );
 
     // Add some variance
     const varyBpm = simulatedBpm + (Math.random() - 0.5) * 10;
     const varyTemp = parseFloat(simulatedTemp) + (Math.random() - 0.5) * 0.5;
 
     console.log(
-      `[DEBUG] Sample ${sampleCount}: BPM=${varyBpm.toFixed(1)}, Temp=${varyTemp.toFixed(1)}, Progress=${progress.toFixed(1)}`,
+      `[DEBUG] Sample ${sampleCount}/${totalSamples}: BPM=${varyBpm.toFixed(1)}, Temp=${varyTemp.toFixed(1)}, Progress=${progress}%`,
     );
 
     io.emit("vitals-progress", {
       bpm: parseFloat(varyBpm.toFixed(1)),
       temp: parseFloat(varyTemp.toFixed(1)),
-      progress: parseFloat(progress.toFixed(1)),
+      progress: progress,
       sample_count: sampleCount,
       debug: true,
     });
 
     // Complete after duration
-    if (sampleCount >= simulationDuration * 2) {
+    if (sampleCount >= totalSamples) {
       clearInterval(interval);
       io.emit("vitals-complete", {
         avg_bpm: simulatedBpm,

@@ -46,9 +46,6 @@ export function VitalSignsScreen() {
       console.log("⚠️ Checking for sensor data after 5 seconds...");
       setShowSensorPrompt(true);
       setStatusText("Please place your finger on the sensor");
-
-      // Send command to ESP32 to blink heart rate LED
-      axios.post(`${API_BASE}/api/esp32/blink-heart-led`).catch(console.error);
     }, 5000);
     setPromptTimer(timer);
 
@@ -60,6 +57,17 @@ export function VitalSignsScreen() {
       }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Control LED blinking based on modal state
+  useEffect(() => {
+    if (showSensorPrompt) {
+      console.log("💡 Starting heart rate LED blink (modal opened)");
+      axios.post(`${API_BASE}/api/esp32/blink-heart-led`).catch(console.error);
+    } else {
+      console.log("🔴 Stopping LED blink (modal closed)");
+      axios.post(`${API_BASE}/api/esp32/stop-blink`).catch(console.error);
+    }
+  }, [showSensorPrompt]);
 
   useEffect(() => {
     if (!socket) return;
@@ -77,11 +85,8 @@ export function VitalSignsScreen() {
         if (!hasReceivedData) {
           console.log("✅ First sensor data received, hiding prompt");
           setHasReceivedData(true);
-
-          // Stop LED blinking
-          axios.post(`${API_BASE}/api/esp32/stop-blink`).catch(console.error);
         }
-        setShowSensorPrompt(false); // Hide prompt when data starts coming
+        setShowSensorPrompt(false); // Hide prompt when data starts coming (LED will auto-stop via useEffect)
       }
 
       // Update heart rate and temperature with real data
@@ -92,9 +97,9 @@ export function VitalSignsScreen() {
         setTemperature(parseFloat(data.temp.toFixed(1)));
       }
 
-      // Update progress bar (convert to percentage 0-100)
+      // Update progress bar (progress is already 0-100 from backend)
       if (data.progress !== undefined) {
-        const progressPercent = Math.min(100, data.progress * 10);
+        const progressPercent = Math.min(100, Math.round(data.progress));
         setProgress(progressPercent);
       }
 

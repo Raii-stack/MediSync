@@ -22,7 +22,6 @@ db.run("PRAGMA foreign_keys = ON", (err) => {
 
 // Arrays to track completion
 const tables = [
-  "kiosk_config",
   "students_cache",
   "medicines_library",
   "kiosk_slots",
@@ -30,30 +29,12 @@ const tables = [
 ];
 let completedTables = 0;
 
-// 1. Create kiosk_config table
-db.run(
-  `
-  CREATE TABLE IF NOT EXISTS kiosk_config (
-    kiosk_id TEXT PRIMARY KEY,
-    room_assigned TEXT
-  )
-`,
-  (err) => {
-    if (err) {
-      console.error("Error creating kiosk_config table:", err.message);
-      process.exit(1);
-    }
-    console.log("✓ kiosk_config table created or already exists");
-    completedTables++;
-    checkCompletion();
-  },
-);
-
-// 2. Create students_cache table (local mirror of student data)
+// 1. Create students_cache table (local mirror of student data)
 db.run(
   `
   CREATE TABLE IF NOT EXISTS students_cache (
-    student_id TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id TEXT,
     student_uuid TEXT,
     rfid_uid TEXT UNIQUE,
     first_name TEXT,
@@ -73,7 +54,7 @@ db.run(
   },
 );
 
-// 3. Create medicines_library table
+// 2. Create medicines_library table
 db.run(
   `
   CREATE TABLE IF NOT EXISTS medicines_library (
@@ -96,7 +77,7 @@ db.run(
   },
 );
 
-// 4. Create kiosk_slots table (Dynamic slot management)
+// 3. Create kiosk_slots table (Dynamic slot management)
 db.run(
   `
   CREATE TABLE IF NOT EXISTS kiosk_slots (
@@ -120,7 +101,7 @@ db.run(
   },
 );
 
-// 5. Create kiosk_logs table (references local students_cache, NOT cloud)
+// 4. Create kiosk_logs table
 db.run(
   `
   CREATE TABLE IF NOT EXISTS kiosk_logs (
@@ -133,8 +114,7 @@ db.run(
     medicine_dispensed TEXT,
     slot_used INTEGER,
     synced BOOLEAN DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (student_id) REFERENCES students_cache(student_id)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )
 `,
   (err) => {
