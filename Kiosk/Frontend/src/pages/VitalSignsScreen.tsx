@@ -3,21 +3,27 @@ import { useNavigate } from "react-router";
 import { KioskLayout } from "../components/KioskLayout";
 import { useEffect, useState } from "react";
 import { useSocket } from "../contexts/SocketContext";
+import { useKiosk } from "../contexts/KioskContext";
 import axios from "axios";
 import imgHeartWithPulse from "../assets/heart-icon.png";
 import imgTemperature from "../assets/temp-icon.png";
 import { API_BASE_URL } from "../config/api";
+import { SensorPromptModal } from "../components/SensorPromptModal";
 
 const API_BASE = API_BASE_URL;
 
 export function VitalSignsScreen() {
   const navigate = useNavigate();
   const { socket } = useSocket();
+  const { setVitalSigns } = useKiosk();
   const [progress, setProgress] = useState(0);
   const [heartRate, setHeartRate] = useState<number | null>(null);
   const [temperature, setTemperature] = useState<number | null>(null);
   const [statusText, setStatusText] = useState("Starting scan...");
   const [isScanning, setIsScanning] = useState(false);
+  const [showSensorPrompt, setShowSensorPrompt] = useState(false);
+  const [hasReceivedData, setHasReceivedData] = useState(false);
+  const [promptTimer, setPromptTimer] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Start the vitals scan when component mounts
@@ -35,8 +41,20 @@ export function VitalSignsScreen() {
 
     startScan();
 
+    // Show sensor prompt after 5 seconds if no data received
+    const timer = setTimeout(() => {
+      console.log("⚠️ Checking for sensor data after 5 seconds...");
+      setShowSensorPrompt(true);
+      setStatusText("Please place your finger on the sensor");
+
+      // Send command to ESP32 to blink heart rate LED
+      axios.post(`${API_BASE}/api/esp32/blink-heart-led`).catch(console.error);
+    }, 5000);
+    setPromptTimer(timer);
+
     // Cleanup: stop scan when component unmounts
     return () => {
+      if (timer) clearTimeout(timer);
       if (isScanning) {
         axios.post(`${API_BASE}/api/scan/stop`).catch(console.error);
       }
@@ -53,6 +71,18 @@ export function VitalSignsScreen() {
       progress: number;
     }) => {
       console.log("📊 Vitals progress:", data);
+
+      // Mark that we've received data
+      if (data.bpm || data.temp) {
+        if (!hasReceivedData) {
+          console.log("✅ First sensor data received, hiding prompt");
+          setHasReceivedData(true);
+
+          // Stop LED blinking
+          axios.post(`${API_BASE}/api/esp32/stop-blink`).catch(console.error);
+        }
+        setShowSensorPrompt(false); // Hide prompt when data starts coming
+      }
 
       // Update heart rate and temperature with real data
       if (data.bpm) {
@@ -76,17 +106,27 @@ export function VitalSignsScreen() {
       console.log("✅ Vitals scan complete:", data);
 
       // Set final averaged values
-      setHeartRate(Math.round(data.avg_bpm));
-      setTemperature(parseFloat(data.temp.toFixed(1)));
+      const finalBpm = Math.round(data.avg_bpm);
+      const finalTemp = parseFloat(data.temp.toFixed(1));
+
+      setHeartRate(finalBpm);
+      setTemperature(finalTemp);
       setProgress(100);
       setStatusText("Scan complete!");
 
-      // Store vitals in sessionStorage for use in other screens
+      // Store vitals in KioskContext
+      setVitalSigns({
+        heartRate: finalBpm,
+        temperature: finalTemp,
+        oxygenLevel: 98, // Default value
+      });
+
+      // Also store in sessionStorage for backward compatibility
       sessionStorage.setItem(
         "vitals",
         JSON.stringify({
-          bpm: Math.round(data.avg_bpm),
-          temp: parseFloat(data.temp.toFixed(1)),
+          bpm: finalBpm,
+          temp: finalTemp,
         }),
       );
 
@@ -114,7 +154,7 @@ export function VitalSignsScreen() {
         {/* Title Badge */}
         <div className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 top-[calc(50%-296.51px)] bg-white/80 backdrop-blur-sm flex gap-3 items-center px-6 py-3 rounded-full shadow-lg">
           <Activity className="w-5 h-5 text-[#4A90E2]" />
-          <span className="text-sm font-normal text-[#4a5565] uppercase tracking-wide">
+          <span className="text-sm font-medium text-[#4a5565] uppercase tracking-wide">
             Health Monitoring
           </span>
         </div>
@@ -207,6 +247,12 @@ export function VitalSignsScreen() {
           {statusText}
         </p>
       </div>
+
+      {/* Sensor Prompt Modal */}
+      <SensorPromptModal
+        isOpen={showSensorPrompt}
+        onComplete={() => setShowSensorPrompt(false)}
+      />
     </KioskLayout>
   );
 }

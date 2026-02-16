@@ -9,12 +9,12 @@ param(
 
 $baseUrl = "http://localhost:3001"
 
-Write-Host "`n🧪 MediSync Kiosk Testing Script`n" -ForegroundColor Cyan
+Write-Host "`n[TEST] MediSync Kiosk Testing Script`n" -ForegroundColor Cyan
 
 function Test-RFID {
     param([string]$rfidUid = "RFID001")
     
-    Write-Host "📡 Simulating RFID Tap: $rfidUid" -ForegroundColor Yellow
+    Write-Host "[RFID] Simulating RFID Tap: $rfidUid" -ForegroundColor Yellow
     
     $body = @{
         rfid_uid = $rfidUid
@@ -22,10 +22,10 @@ function Test-RFID {
     
     try {
         $response = Invoke-RestMethod -Method POST -Uri "$baseUrl/api/debug/rfid" -ContentType "application/json" -Body $body
-        Write-Host "✅ RFID Simulation Success!" -ForegroundColor Green
-        Write-Host "   Response: $($response.message)" -ForegroundColor Gray
+        Write-Host "[OK] RFID Simulation Success!" -ForegroundColor Green
+        Write-Host "     Response: $($response.message)" -ForegroundColor Gray
     } catch {
-        Write-Host "❌ Error: $_" -ForegroundColor Red
+        Write-Host "[ERROR] $_" -ForegroundColor Red
     }
 }
 
@@ -36,8 +36,8 @@ function Test-Vitals {
         [int]$duration = 5
     )
     
-    Write-Host "❤️  Simulating Vitals Data (Duration: ${duration}s)" -ForegroundColor Yellow
-    Write-Host "   BPM: $bpm, Temperature: ${temp}°C" -ForegroundColor Gray
+    Write-Host "[VITALS] Simulating Vitals Data (Duration: ${duration}s)" -ForegroundColor Yellow
+    Write-Host "         BPM: $bpm, Temperature: ${temp}C" -ForegroundColor Gray
     
     $body = @{
         bpm = $bpm
@@ -47,25 +47,25 @@ function Test-Vitals {
     
     try {
         $response = Invoke-RestMethod -Method POST -Uri "$baseUrl/api/debug/vitals" -ContentType "application/json" -Body $body
-        Write-Host "✅ Vitals Simulation Started!" -ForegroundColor Green
-        Write-Host "   Response: $($response.message)" -ForegroundColor Gray
-        Write-Host "   Watch the frontend for real-time updates..." -ForegroundColor Cyan
+        Write-Host "[OK] Vitals Simulation Started!" -ForegroundColor Green
+        Write-Host "     Response: $($response.message)" -ForegroundColor Gray
+        Write-Host "     Watch the frontend for real-time updates..." -ForegroundColor Cyan
     } catch {
-        Write-Host "❌ Error: $_" -ForegroundColor Red
+        Write-Host "[ERROR] $_" -ForegroundColor Red
     }
 }
 
 function Test-Status {
-    Write-Host "📊 Checking Backend Status..." -ForegroundColor Yellow
+    Write-Host "[STATUS] Checking Backend Status..." -ForegroundColor Yellow
     
     try {
         $response = Invoke-RestMethod -Method GET -Uri "$baseUrl/api/debug/status"
-        Write-Host "✅ Backend Status:" -ForegroundColor Green
-        Write-Host "   Debug Mode: $($response.debug_mode)" -ForegroundColor Gray
-        Write-Host "   Connected Clients: $($response.connected_clients)" -ForegroundColor Gray
-        Write-Host "   Message: $($response.message)" -ForegroundColor Gray
+        Write-Host "[OK] Backend Status:" -ForegroundColor Green
+        Write-Host "     Debug Mode: $($response.debug_mode)" -ForegroundColor Gray
+        Write-Host "     Connected Clients: $($response.connected_clients)" -ForegroundColor Gray
+        Write-Host "     Message: $($response.message)" -ForegroundColor Gray
     } catch {
-        Write-Host "❌ Error connecting to backend. Is it running on port 3001?" -ForegroundColor Red
+        Write-Host "[ERROR] Error connecting to backend. Is it running on port 3001?" -ForegroundColor Red
     }
 }
 
@@ -102,19 +102,19 @@ switch ($TestType) {
         Show-Menu
         Test-RFID -rfidUid "RFID001"
         
-        Write-Host "`n⏳ Waiting 3 seconds for frontend navigation..." -ForegroundColor Cyan
+        Write-Host "`n[WAIT] Waiting 3 seconds for frontend navigation..." -ForegroundColor Cyan
         Start-Sleep -Seconds 3
         
         # Step 3: Simulate vitals
         Write-Host ""
         Test-Vitals -bpm 75 -temp 37.0 -duration 10
         
-        Write-Host "`n✨ Integration test complete!" -ForegroundColor Green
-        Write-Host "   Check your browser at http://localhost:5173" -ForegroundColor Cyan
+        Write-Host "`n[DONE] Integration test complete!" -ForegroundColor Green
+        Write-Host "       Check your browser at http://localhost:5173" -ForegroundColor Cyan
     }
 }
 
-Write-Host "`n📝 Usage Examples:" -ForegroundColor Cyan
+Write-Host "`n[INFO] Usage Examples:" -ForegroundColor Cyan
 Write-Host "   .\test-integration.ps1 -TestType rfid    # Test RFID only" -ForegroundColor Gray
 Write-Host "   .\test-integration.ps1 -TestType vitals  # Test vitals only" -ForegroundColor Gray
 Write-Host "   .\test-integration.ps1 -TestType status  # Check backend status" -ForegroundColor Gray

@@ -75,7 +75,7 @@ export function KioskLayout({
       {/* Greeting */}
       {greeting && (
         <div className="flex-shrink-0 px-6 py-6">
-          <div className="text-xl font-medium text-gray-700">{greeting}</div>
+          <div className="text-4xl font-medium text-gray-700">{greeting}</div>
         </div>
       )}
 

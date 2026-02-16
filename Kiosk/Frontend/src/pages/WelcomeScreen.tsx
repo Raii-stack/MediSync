@@ -3,10 +3,14 @@ import { useNavigate } from "react-router";
 import { KioskLayout } from "../components/KioskLayout";
 import { useSocket } from "../contexts/SocketContext";
 import { useEffect, useState } from "react";
+import { AdminPasswordModal } from "../components/AdminPasswordModal";
 
 export function WelcomeScreen() {
   const navigate = useNavigate();
   const { socket, isConnected } = useSocket();
+  const [logoClickCount, setLogoClickCount] = useState(0);
+  const [lastClickTime, setLastClickTime] = useState(0);
+  const [showAdminModal, setShowAdminModal] = useState(false);
 
   useEffect(() => {
     if (!socket) return;
@@ -39,11 +43,53 @@ export function WelcomeScreen() {
     };
   }, [socket, navigate]);
 
+  // Secret admin access via 5 rapid clicks on logo
+  const handleLogoClick = () => {
+    const now = Date.now();
+
+    // Reset counter if more than 1 second since last click
+    if (now - lastClickTime > 1000) {
+      setLogoClickCount(1);
+    } else {
+      const newCount = logoClickCount + 1;
+      setLogoClickCount(newCount);
+
+      if (newCount === 5) {
+        // Show admin password modal after 5 clicks
+        setShowAdminModal(true);
+        setLogoClickCount(0);
+      }
+    }
+
+    setLastClickTime(now);
+  };
+
+  // Handle successful password entry
+  const handleAdminSuccess = () => {
+    setShowAdminModal(false);
+    sessionStorage.setItem("adminAccessGranted", "true");
+    navigate("/admin");
+  };
+
+  // Fullscreen on double-click title
+  const handleTitleDoubleClick = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
+
   return (
     <KioskLayout showVersion={true}>
       <div className="flex flex-col items-center justify-center w-full max-w-3xl mx-auto">
         {/* Logo with animated gradient */}
-        <div className="relative mb-10 animate-fade-in-down">
+        <div
+          className="relative mb-10 animate-fade-in-down"
+          onClick={handleLogoClick}
+        >
           <div className="absolute inset-0 bg-gradient-to-br from-[#4A90E2] to-[#357ABD] rounded-[2.5rem] blur-2xl opacity-30 scale-110 animate-pulse-slow"></div>
           <div className="relative bg-gradient-to-br from-[#4A90E2] via-[#5B9FE3] to-[#357ABD] rounded-[2.5rem] p-12 shadow-2xl animate-float">
             <Building2 className="w-24 h-24 text-white" strokeWidth={1.5} />
@@ -51,7 +97,10 @@ export function WelcomeScreen() {
         </div>
 
         {/* Welcome Text */}
-        <h1 className="text-6xl font-bold text-gray-800 mb-4 text-center tracking-tight animate-fade-in-up animation-delay-200">
+        <h1
+          className="text-6xl font-bold text-gray-800 mb-4 text-center tracking-tight animate-fade-in-up animation-delay-200 cursor-pointer select-none"
+          onDoubleClick={handleTitleDoubleClick}
+        >
           Welcome to{" "}
           <span className="bg-gradient-to-r from-[#4A90E2] to-[#357ABD] bg-clip-text text-transparent animate-gradient">
             MediSync
@@ -92,6 +141,13 @@ export function WelcomeScreen() {
         <div className="absolute top-1/4 left-1/4 w-72 h-72 bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
         <div className="absolute top-1/3 right-1/4 w-72 h-72 bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
       </div>
+
+      {/* Admin Password Modal */}
+      <AdminPasswordModal
+        isOpen={showAdminModal}
+        onClose={() => setShowAdminModal(false)}
+        onSuccess={handleAdminSuccess}
+      />
     </KioskLayout>
   );
 }

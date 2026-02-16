@@ -1,6 +1,7 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+const { io: ioClient } = require("socket.io-client");
 const cors = require("cors");
 require("dotenv").config();
 const db = require("./database");
@@ -9,6 +10,35 @@ const hardware = require("./serial");
 // Initialize App
 const app = express();
 const KIOSK_ID = process.env.KIOSK_ID || "kiosk-001";
+
+// Connect to Clinic Socket (for emergency alerts)
+const CLINIC_SOCKET_URL = process.env.CLINIC_SOCKET_URL;
+let clinicSocket = null;
+
+if (CLINIC_SOCKET_URL) {
+  console.log(`🏥 Connecting to clinic socket at: ${CLINIC_SOCKET_URL}`);
+  clinicSocket = ioClient(CLINIC_SOCKET_URL, {
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionAttempts: Infinity,
+  });
+
+  clinicSocket.on("connect", () => {
+    console.log(`✅ Connected to clinic app (Socket ID: ${clinicSocket.id})`);
+  });
+
+  clinicSocket.on("disconnect", () => {
+    console.log(`⚠️  Disconnected from clinic app`);
+  });
+
+  clinicSocket.on("connect_error", (error) => {
+    console.error(`❌ Clinic socket connection error: ${error.message}`);
+  });
+} else {
+  console.log(
+    "⚠️  CLINIC_SOCKET_URL not set. Emergency alerts will only be logged.",
+  );
+}
 
 // CORS Configuration - Allow all origins for development
 const corsOptions = {
@@ -218,6 +248,34 @@ hardware.onData((event) => {
       );
       hardware.stopScan();
       completeVitalsSession();
+    }
+
+    return;
+  }
+
+  if (event.type === "emergency") {
+    console.log(`🚨 EMERGENCY BUTTON - Physical device triggered`);
+    const timestamp = new Date().toISOString();
+
+    const emergencyData = {
+      kiosk_id: KIOSK_ID,
+      student_id: null, // Physical button doesn't know who pressed it
+      timestamp,
+      alert_type: "physical_button",
+      source: event.source || "physical_button",
+    };
+
+    // Emit to local UI
+    io.emit("emergency-alert", emergencyData);
+
+    // Emit to clinic app via socket
+    if (clinicSocket && clinicSocket.connected) {
+      clinicSocket.emit("kiosk-emergency", emergencyData);
+      console.log(`✅ Physical emergency alert sent to clinic app`);
+    } else {
+      console.error(
+        "❌ Clinic socket not connected. Physical emergency alert not sent.",
+      );
     }
 
     return;
@@ -508,6 +566,84 @@ app.post("/api/dispense", (req, res) => {
   );
 });
 
+// --- ADMIN API: WiFi Network Management ---
+// GET: Scan for WiFi networks
+app.get("/api/scan", (req, res) => {
+  console.log("📡 WiFi Scan requested");
+
+  // For development/testing, return mock data
+  // In production on Raspberry Pi, use nmcli or similar
+  const mockNetworks = [
+    {
+      ssid: "SchoolNet_5G",
+      signalStrength: 95,
+      security: "WPA2",
+      isConnected: false,
+    },
+    {
+      ssid: "SchoolNet_2.4G",
+      signalStrength: 88,
+      security: "WPA2",
+      isConnected: false,
+    },
+    {
+      ssid: "Clinic_Network",
+      signalStrength: 72,
+      security: "WPA3",
+      isConnected: false,
+    },
+    {
+      ssid: "Guest_WiFi",
+      signalStrength: 65,
+      security: "Open",
+      isConnected: false,
+    },
+  ];
+
+  // TODO: On Raspberry Pi, use:
+  // const { execSync } = require('child_process');
+  // const output = execSync('nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list').toString();
+  // Parse the output and return networks
+
+  res.json({
+    success: true,
+    networks: mockNetworks,
+  });
+});
+
+// POST: Connect to WiFi network
+app.post("/api/connect", (req, res) => {
+  const { ssid, password } = req.body;
+
+  if (!ssid) {
+    return res.status(400).json({
+      success: false,
+      error: "SSID is required",
+    });
+  }
+
+  console.log(`📶 Attempting to connect to WiFi: ${ssid}`);
+
+  // For development/testing, simulate success
+  // In production on Raspberry Pi, use nmcli to connect
+  // TODO: On Raspberry Pi, use:
+  // const { execSync } = require('child_process');
+  // try {
+  //   execSync(`nmcli dev wifi connect "${ssid}" password "${password}"`);
+  //   res.json({ success: true, message: `Connected to ${ssid}` });
+  // } catch (error) {
+  //   res.status(500).json({ success: false, error: error.message });
+  // }
+
+  setTimeout(() => {
+    res.json({
+      success: true,
+      message: `Connected to ${ssid}`,
+      ssid,
+    });
+  }, 1000);
+});
+
 // POST: Start Sensor Scan
 app.post("/api/scan/start", (req, res) => {
   console.log("🟢 START_SCAN received");
@@ -540,38 +676,31 @@ app.post("/api/emergency", (req, res) => {
   console.log(`   Student ID: ${student_id || "Unknown"}`);
   console.log(`   Time: ${timestamp}`);
 
-  // Insert emergency alert into database
-  db.run(
-    `INSERT INTO emergency_alerts (student_id, status, synced, created_at) 
-     VALUES (?, ?, ?, ?)`,
-    [student_id || null, "PENDING", 0, timestamp],
-    function (err) {
-      if (err) {
-        console.error("❌ Failed to save emergency alert:", err.message);
-        return res.status(500).json({
-          success: false,
-          message: "Failed to save alert",
-        });
-      }
+  const emergencyData = {
+    kiosk_id: KIOSK_ID,
+    student_id: student_id || null,
+    timestamp,
+    alert_type: "emergency_button",
+  };
 
-      console.log(`✅ Emergency alert saved (ID: ${this.lastID})`);
-      console.log(`   Will sync to cloud on next sync cycle`);
+  // Emit to local UI (for immediate feedback)
+  io.emit("emergency-alert", emergencyData);
 
-      // Emit Socket.IO event for real-time dashboard updates
-      io.emit("emergency-alert", {
-        id: this.lastID,
-        kiosk_id: KIOSK_ID,
-        student_id: student_id || null,
-        timestamp,
-      });
-
-      res.json({
-        success: true,
-        message: "Emergency alert sent. Clinic will be notified.",
-        alert_id: this.lastID,
-      });
-    },
-  );
+  // Emit to clinic app via socket
+  if (clinicSocket && clinicSocket.connected) {
+    clinicSocket.emit("kiosk-emergency", emergencyData);
+    console.log(`✅ Emergency alert sent to clinic app`);
+    res.json({
+      success: true,
+      message: "Emergency alert sent to clinic.",
+    });
+  } else {
+    console.error("❌ Clinic socket not connected. Alert not sent.");
+    res.status(503).json({
+      success: false,
+      message: "Clinic connection unavailable. Please contact staff directly.",
+    });
+  }
 });
 
 // ========== DEBUG ENDPOINTS ==========
@@ -605,6 +734,33 @@ app.post("/api/debug/rfid", (req, res) => {
   );
 
   res.json({ success: true, message: `Simulating RFID: ${uid}` });
+});
+
+// POST: Debug - Trigger ESP32 RFID Simulation
+app.post("/api/debug/esp32-rfid", (req, res) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+
+  const { uid } = req.body;
+
+  console.log(`\n\n🔴 [DEBUG] Sending fake RFID to ESP32 to trigger vitals...`);
+
+  const result = hardware.sendFakeRFIDToESP32(uid);
+
+  if (result.success) {
+    res.json({
+      success: true,
+      message: `Fake RFID sent to ESP32: ${result.uid}`,
+      uid: result.uid,
+      mode: result.mode,
+    });
+  } else {
+    res.status(500).json({
+      success: false,
+      message: "Failed to send fake RFID to ESP32",
+    });
+  }
 });
 
 // POST: Debug - Simulate Vitals Data
@@ -664,19 +820,62 @@ app.post("/api/debug/vitals", (req, res) => {
   });
 });
 
-// GET: Debug - Status
-app.get("/api/debug/status", (req, res) => {
-  // Explicitly set CORS headers
+// POST: ESP32 - Blink Heart Rate LED
+app.post("/api/esp32/blink-heart-led", (req, res) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.header("Access-Control-Allow-Headers", "Content-Type");
 
+  console.log("💡 [ESP32] Starting heart rate LED blink");
+
+  const result = hardware.blinkHeartLED();
+
+  res.json({
+    success: result.success,
+    message: "Heart rate LED blinking started",
+    mode: result.mode,
+  });
+});
+
+// POST: ESP32 - Stop LED Blinking
+app.post("/api/esp32/stop-blink", (req, res) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+
+  console.log("💡 [ESP32] Stopping LED blink");
+
+  const result = hardware.stopBlinkLED();
+
+  res.json({
+    success: result.success,
+    message: "LED blinking stopped",
+    mode: result.mode,
+  });
+});
+
+// POST: Test Dispense (Admin tool - just triggers hardware without logging)
+app.post("/api/test-dispense", (req, res) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+
+  const { slot_id } = req.body;
+
+  if (!slot_id || slot_id < 1 || slot_id > 4) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid slot_id (must be 1-4)",
+    });
+  }
+
+  console.log(`🧪 [TEST] Dispensing from Slot ${slot_id}`);
+  hardware.dispense(slot_id);
+
   res.json({
     success: true,
-    debug_mode: true,
-    connected_clients: io.engine.clientsCount,
-    message:
-      "Debug endpoints available: POST /api/debug/rfid, POST /api/debug/vitals",
+    message: `Test dispense from slot ${slot_id} sent to hardware`,
+    slot_id: slot_id,
   });
 });
 

@@ -3,8 +3,8 @@ import { WelcomeScreen } from "./pages/WelcomeScreen";
 import { VitalSignsScreen } from "./pages/VitalSignsScreen";
 import { SymptomsScreen } from "./pages/SymptomsScreen";
 import { RecommendationScreen } from "./pages/RecommendationScreen";
-import { DispensingScreen } from "./pages/DispensingScreen";
 import { ReceiptScreen } from "./pages/ReceiptScreen";
+import { ProtectedAdminRoute } from "./components/ProtectedAdminRoute";
 
 export const router = createBrowserRouter([
   {
@@ -24,11 +24,11 @@ export const router = createBrowserRouter([
     Component: RecommendationScreen,
   },
   {
-    path: "/dispensing",
-    Component: DispensingScreen,
-  },
-  {
     path: "/receipt",
     Component: ReceiptScreen,
+  },
+  {
+    path: "/admin",
+    Component: ProtectedAdminRoute,
   },
 ]);

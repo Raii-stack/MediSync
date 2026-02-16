@@ -76,12 +76,7 @@ async function syncData() {
     await pushKioskLogs();
 
     // =====================================================================
-    // STEP C: PUSH UNSYNCED EMERGENCY ALERTS TO CLOUD
-    // =====================================================================
-    await pushEmergencyAlerts();
-
-    // =====================================================================
-    // STEP D: UPDATE INVENTORY LEVELS IN CLOUD
+    // STEP C: UPDATE INVENTORY LEVELS IN CLOUD
     // =====================================================================
     await syncInventory();
 
@@ -303,81 +298,7 @@ async function pushKioskLogs() {
 }
 
 // ============================================================================
-// STEP C: Push Unsynced Emergency Alerts to Cloud
-// ============================================================================
-async function pushEmergencyAlerts() {
-  return new Promise((resolve, reject) => {
-    // Query alerts with student UUID from cache
-    db.all(
-      `
-      SELECT 
-        ea.*,
-        COALESCE(sc.student_uuid, NULL) as student_uuid
-      FROM emergency_alerts ea
-      LEFT JOIN students_cache sc ON ea.student_id = sc.student_id
-      WHERE ea.synced = 0 
-      ORDER BY ea.created_at DESC
-    `,
-      async (err, rows) => {
-        if (err) {
-          console.error("[SYNC-C] Database error:", err.message);
-          return resolve();
-        }
-
-        if (rows.length === 0) {
-          console.log("[SYNC-C] ✓ No emergency alerts to sync.");
-          return resolve();
-        }
-
-        console.log(
-          `[SYNC-C] 🚨 Found ${rows.length} alert(s). Pushing to cloud...`,
-        );
-
-        try {
-          const alertsToSync = rows.map((row) => ({
-            kiosk_id: KIOSK_ID,
-            student_id: row.student_uuid, // Use UUID from students_cache
-            alert_message: `Emergency alert from kiosk`,
-            alert_status: row.status || "PENDING",
-            created_at: row.created_at,
-          }));
-
-          const { error } = await supabase
-            .from("emergency_alerts")
-            .insert(alertsToSync);
-
-          if (error) {
-            console.error("[SYNC-C] Supabase error:", error.message);
-            return resolve();
-          }
-
-          db.run(
-            "UPDATE emergency_alerts SET synced = 1 WHERE synced = 0",
-            (err) => {
-              if (err) {
-                console.error(
-                  "[SYNC-C] Failed to mark as synced:",
-                  err.message,
-                );
-              } else {
-                console.log(
-                  `[SYNC-C] ✅ Marked ${rows.length} alert(s) as synced.`,
-                );
-              }
-              resolve();
-            },
-          );
-        } catch (err) {
-          console.error("[SYNC-C] Error:", err.message);
-          resolve();
-        }
-      },
-    );
-  });
-}
-
-// ============================================================================
-// STEP D: Sync Inventory — ONE-WAY: Local (SQLite) → Cloud (Supabase)
+// STEP C: Sync Inventory — ONE-WAY: Local (SQLite) → Cloud (Supabase)
 // The Kiosk is the Source of Truth for stock levels.
 // ============================================================================
 async function syncInventory() {
