@@ -1,0 +1,61 @@
+services:
+  backend:
+    build:
+      context: ./Kiosk/Backend
+      dockerfile: Dockerfile
+    container_name: medisync-backend
+    ports:
+      - "3001:3001"
+    volumes:
+      - /app/node_modules
+      # Persist the app directory
+      - backend-db:/app
+    environment:
+      - NODE_ENV=development
+    networks:
+      - medisync-network
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync
+          path: ./Kiosk/Backend
+          target: /app
+          ignore:
+            - node_modules/
+            - kiosk.db
+            - kiosk.db-journal
+        - action: rebuild
+          path: ./Kiosk/Backend/package.json
+
+  frontend:
+    build:
+      context: ./Kiosk/Frontend
+      dockerfile: Dockerfile
+    container_name: medisync-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    networks:
+      - medisync-network
+    environment:
+      - NODE_ENV=development
+      - VITE_API_BASE_URL=/api
+    develop:
+      watch:
+        - path: ./Kiosk/Frontend/package.json
+          action: rebuild
+        - path: ./Kiosk/Frontend/package-lock.json
+          action: rebuild
+        - path: ./Kiosk/Frontend
+          target: /app
+          action: sync
+
+networks:
+  medisync-network:
+    driver: bridge
+
+volumes:
+  # FIX: Add '{}' to explicitly define this as a mapping
+  backend-db: {}

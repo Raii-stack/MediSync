@@ -1,0 +1,247 @@
+# ESP32 Wiring Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              ESP32 DevKit v1                                │
+│                                                                             │
+│  3.3V ────┬───────┬──────┬────────────────────────────────────────────────┐│
+│           │       │      │                                                ││
+│  GPIO 4 ──┼───────┼──────┼──── RST ───────────┐                          ││
+│  GPIO 5 ──┼───────┼──────┼──── SS ────────────┤   RC522 RFID             ││
+│  GPIO 18 ─┼───────┼──────┼──── SCK ───────────┤   (3.3V)                 ││
+│  GPIO 19 ─┼───────┼──────┼──── MISO ──────────┤                          ││
+│  GPIO 23 ─┼───────┼──────┼──── MOSI ──────────┘                          ││
+│           │       │      │                                                ││
+│  GPIO 12 ─┼───────┼──────┼──── R ─┐                                      ││
+│  GPIO 13 ─┼───────┼──────┼──── G ─┤  Progress LED (RGB)                 ││
+│  GPIO 14 ─┼───────┼──────┼──── B ─┤  (Common Cathode)                   ││
+│           │       │      │        └─ Cathode → GND                       ││
+│           │       │      │                                                ││
+│  GPIO 27 ─┼───────┼──────┼──── R ─┐                                      ││
+│  GPIO 26 ─┼───────┼──────┼──── G ─┤  Status LED (RGB)                   ││
+│  GPIO 25 ─┼───────┼──────┼──── B ─┤  (Common Cathode)                   ││
+│           │       │      │        └─ Cathode → GND                       ││
+│           │       │      │                                                ││
+│  GPIO 15 ─┼───────┼──────┼──── (+) ──┐                                   ││
+│           │       │      │            │  Passive Buzzer                   ││
+│           │       │      └────────────┴─ (-) → GND                       ││
+│           │       │                                                       ││
+│  GPIO 18 ─┼───────┼─── SDA ─┐                                            ││
+│  GPIO 19 ─┼───────┼─── SCL ─┤  MAX30102 Heart Rate Sensor               ││
+│           │       │          │  (3.3V - NOT 5V!)                         ││
+│           │       └──────────┴─ VCC (3.3V)                               ││
+│           │                                                               ││
+│  GPIO 21 ─┼─── SDA ─┐                                                    ││
+│  GPIO 22 ─┼─── SCL ─┤  MLX90614 Thermal Sensor                          ││
+│           │          │  (5V)                                             ││
+│  5V ──────┴──────────┴─ VCC (5V)                                         ││
+│                                                                           ││
+│  GPIO 33 ─────────────── IN1 ─┐                                          ││
+│  GPIO 32 ─────────────── IN2 ─┤                                          ││
+│  GPIO 25 ─────────────── IN3 ─┤  4-Channel Relay Module                 ││
+│  GPIO 26 ─────────────── IN4 ─┤  (Active LOW)                           ││
+│  5V ────────────────────  VCC ─┤                                         ││
+│  GND ───────────────────  GND ─┘                                         ││
+│                                                                           ││
+│  GPIO 17 (TX2) ─────────────── RX  (USB-UART to Raspberry Pi)           ││
+│  GPIO 16 (RX2) ─────────────── TX                                       ││
+│  GND ──────────────────────────  GND                                     ││
+│                                                                           ││
+│  GPIO 34 ───────────────────────┐  Emergency Button                     ││
+│                      (Button)   │  (Momentary Push, NO)                 ││
+│  GND ───────────────────────────┘  Internal pull-up enabled             ││
+│                                                                           ││
+│  GND ────────── Common Ground (all components)                           ││
+└─────────────────────────────────────────────────────────────────────────────┘
+
+POWER CONNECTIONS:
+==================
+
+3.3V Rail (from ESP32):
+  ├─ RC522 RFID Module
+  ├─ MAX30102 Heart Rate Sensor (IMPORTANT: 3.3V ONLY!)
+  └─ LED current limiting resistors (optional)
+
+5V Rail (from USB or external):
+  ├─ ESP32 VIN pin
+  ├─ MLX90614 Thermal Sensor
+  └─ 4-Channel Relay Module VCC
+
+Common Ground:
+  ├─ ESP32 GND
+  ├─ All sensor modules GND
+  ├─ Relay module GND
+  ├─ LED cathodes
+  ├─ Buzzer (-)
+  └─ Raspberry Pi GND (via USB-UART)
+
+
+I2C BUS SEPARATION (Important!):
+=================================
+
+Bus 0 (Wire):  GPIO 21 (SDA), GPIO 22 (SCL) → MLX90614 (5V device)
+Bus 1 (Wire1): GPIO 18 (SDA), GPIO 19 (SCL) → MAX30102 (3.3V device)
+
+Note: These buses are separated to avoid voltage conflicts between 5V and 3.3V I2C devices.
+
+
+RELAY WIRING (Medicine Dispensing):
+====================================
+
+Each relay controls one medicine slot:
+
+Relay 1 (GPIO 33) → Medicine Slot 1
+Relay 2 (GPIO 32) → Medicine Slot 2
+Relay 3 (GPIO 25) → Medicine Slot 3
+Relay 4 (GPIO 26) → Medicine Slot 4
+
+Relay Module Terminals:
+  COM   → Power source (+) for solenoid/motor
+  NO    → Solenoid/motor (+)
+  NC    → Not used
+  GND   → Power source (-)
+
+Active LOW: GPIO HIGH = Relay OFF, GPIO LOW = Relay ON
+
+
+RGB LED WIRING (Common Cathode):
+=================================
+
+Progress LED:
+  R → GPIO 12 (via 220Ω resistor)
+  G → GPIO 13 (via 220Ω resistor)
+  B → GPIO 14 (via 220Ω resistor)
+  Cathode → GND
+
+Status LED:
+  R → GPIO 27 (via 220Ω resistor)
+  G → GPIO 26 (via 220Ω resistor)
+  B → GPIO 25 (via 220Ω resistor)
+  Cathode → GND
+
+
+BREADBOARD LAYOUT SUGGESTION:
+==============================
+
+Left Side:
+  - ESP32 DevKit
+  - Power rails (3.3V, 5V, GND)
+
+Top Right:
+  - MLX90614 Thermal Sensor
+  - MAX30102 Heart Rate Sensor
+  - RC522 RFID Module
+
+Bottom Right:
+  - Progress LED (RGB)
+  - Status LED (RGB)
+  - Buzzer
+
+External (off breadboard):
+  - 4-Channel Relay Module
+  - USB-UART adapter to Raspberry Pi
+  - Medicine dispensing mechanisms
+
+
+CONNECTION VERIFICATION CHECKLIST:
+===================================
+
+Power:
+[ ] ESP32 powered via USB (5V)
+[ ] 3.3V pin has voltage
+[ ] 5V pin has voltage
+[ ] All GNDs connected together
+
+Sensors:
+[ ] MLX90614: SDA→21, SCL→22, VCC→5V, GND→GND
+[ ] MAX30102: SDA→18, SCL→19, VCC→3.3V (!), GND→GND
+[ ] RC522: SS→5, RST→4, MOSI→23, MISO→19, SCK→18, VCC→3.3V, GND→GND
+
+Outputs:
+[ ] Relay 1: IN→33, 2: IN→32, 3: IN→25, 4: IN→26
+[ ] Progress LED: R→12, G→13, B→14, cathode→GND
+[ ] Status LED: R→27, G→26, B→25, cathode→GND
+[ ] Buzzer: (+)→15, (-)→GND
+
+Communication:
+[ ] UART: ESP TX(17)→RPI RX, ESP RX(16)→RPI TX, ESP GND→RPI GND
+
+
+TROUBLESHOOTING TIPS:
+=====================
+
+No power:
+  - Check USB cable (must support data)
+  - Check power LED on ESP32
+  - Measure 3.3V and 5V pins with multimeter
+
+Sensor not found:
+  - Verify I2C wiring (SDA/SCL not swapped)
+  - Check voltage (3.3V vs 5V)
+  - Scan I2C bus with scanner sketch
+  - Ensure shared GND connections
+
+RFID not reading:
+  - Check SPI connections
+  - Verify 3.3V power
+  - Check antenna connection
+  - Test with different card
+
+Relays not clicking:
+  - Check GPIO pin numbers
+  - Verify relay module power (5V)
+  - Test with digitalWrite() sketch
+  - Check active LOW vs HIGH
+
+LEDs wrong color:
+  - Verify common cathode (not common anode)
+  - Check R/G/B pin assignments
+  - Test with single color first
+  - Add current limiting resistors
+
+No serial communication:
+  - Check TX/RX crossover (TX→RX, RX→TX)
+  - Verify baud rate (115200)
+  - Ensure common ground
+  - Close other serial programs
+
+
+PARTS LIST:
+===========
+
+Core Components:
+  1x ESP32 DevKit v1 (38 pins)
+  1x MLX90614 GY-906 Infrared Temperature Sensor
+  1x MAX30102 Heart Rate & SpO2 Sensor
+  1x RC522 RFID Reader with card/tag
+  1x 4-Channel 5V Relay Module
+  2x RGB LED (Common Cathode, 5mm or SMD)
+  1x Passive Buzzer (not active buzzer)
+  1x USB-UART adapter (for Raspberry Pi connection)
+
+Supporting Components:
+  6x 220Ω resistor (for RGB LEDs)
+  1x Breadboard (830 points recommended)
+  Jumper wires (male-to-male, male-to-female)
+  USB cable (Type-C or Micro-USB for ESP32)
+  5V 2A power supply
+
+Optional:
+  Soldering equipment (for permanent installation)
+  PCB prototype board
+  Heat shrink tubing
+  Cable management clips
+  Enclosure box
+
+
+NEXT STEPS:
+===========
+
+1. Assemble hardware on breadboard following diagram
+2. Upload esp32.ino code via Arduino IDE
+3. Test each component individually (see QUICK_REFERENCE.md)
+4. Connect to Raspberry Pi via USB-UART
+5. Configure backend (see ESP32_SERVER_INTEGRATION.md)
+6. Test full system integration
+7. Mount in kiosk enclosure
+```

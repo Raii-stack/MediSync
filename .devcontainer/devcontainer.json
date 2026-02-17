@@ -1,0 +1,38 @@
+{
+  "image": "mcr.microsoft.com/devcontainers/universal:latest",
+  "customizations": {
+    "vscode": {
+        "extensions": [
+          "jdinhlife.gruvbox",
+          "pkief.material-icon-theme",
+          "esbenp.prettier-vscode",
+          "Upstash.context7-mcp"
+        ],
+        "settings": {
+            "workbench.colorTheme": "Gruvbox Dark Hard",
+            "workbench.iconTheme": "material-icon-theme",
+            "editor.formatOnSave": true
+        }
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "enableNonRoot": "true"
+    }
+  }
+  ,
+  "forwardPorts": [3001, 5173],
+  "portsAttributes": {
+    "3001": {
+      "label": "Backend API",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    },
+    "5173": {
+      "label": "Frontend (Vite)",
+      "onAutoForward": "openBrowser",
+      "visibility": "public"
+    }
+  }
+}
