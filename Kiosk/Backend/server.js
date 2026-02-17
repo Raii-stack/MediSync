@@ -3,6 +3,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 const { io: ioClient } = require("socket.io-client");
 const cors = require("cors");
+const { execSync } = require("child_process");
 require("dotenv").config();
 const db = require("./database");
 const hardware = require("./serial");
@@ -250,7 +251,11 @@ hardware.onData((event) => {
 
     // Auto-complete after collecting enough samples (SIMULATION MODE ONLY)
     // In hardware mode, wait for ESP32's vitals_complete signal
-    if (hardware.isSimulation && hardware.isSimulation() && vitalsSession.sampleCount >= 17) {
+    if (
+      hardware.isSimulation &&
+      hardware.isSimulation() &&
+      vitalsSession.sampleCount >= 17
+    ) {
       console.log(
         "[VITALS] [SIMULATION] Auto-completing scan after collecting sufficient samples",
       );
@@ -600,44 +605,74 @@ app.post("/api/dispense", (req, res) => {
 app.get("/api/scan", (req, res) => {
   console.log("📡 WiFi Scan requested");
 
-  // For development/testing, return mock data
-  // In production on Raspberry Pi, use nmcli or similar
-  const mockNetworks = [
-    {
-      ssid: "SchoolNet_5G",
-      signalStrength: 95,
-      security: "WPA2",
-      isConnected: false,
-    },
-    {
-      ssid: "SchoolNet_2.4G",
-      signalStrength: 88,
-      security: "WPA2",
-      isConnected: false,
-    },
-    {
-      ssid: "Clinic_Network",
-      signalStrength: 72,
-      security: "WPA3",
-      isConnected: false,
-    },
-    {
-      ssid: "Guest_WiFi",
-      signalStrength: 65,
-      security: "Open",
-      isConnected: false,
-    },
-  ];
+  try {
+    // Use nmcli to scan for networks on Raspberry Pi
+    const output = execSync(
+      'nmcli -t -f SSID,SIGNAL,SECURITY,ACTIVE dev wifi list 2>/dev/null || echo ""',
+    )
+      .toString()
+      .trim();
 
-  // TODO: On Raspberry Pi, use:
-  // const { execSync } = require('child_process');
-  // const output = execSync('nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list').toString();
-  // Parse the output and return networks
+    let networks = [];
 
-  res.json({
-    success: true,
-    networks: mockNetworks,
-  });
+    if (output) {
+      // Parse nmcli output format: SSID:SIGNAL:SECURITY:ACTIVE
+      const lines = output.split("\n").filter((line) => line.trim());
+
+      networks = lines
+        .map((line) => {
+          const [ssid, signal, security, active] = line.split(":");
+          return {
+            ssid: ssid || "Hidden Network",
+            signalStrength: parseInt(signal) || 0,
+            security:
+              security && security !== "--" ? security.split(",")[0] : "Open",
+            isConnected: active === "yes",
+          };
+        })
+        .filter((net) => net.ssid); // Remove empty entries
+    } else {
+      // Fallback to mock data if nmcli fails
+      console.log("⚠️  nmcli not available, returning mock networks");
+      networks = [
+        {
+          ssid: "SchoolNet_5G",
+          signalStrength: 95,
+          security: "WPA2",
+          isConnected: false,
+        },
+        {
+          ssid: "SchoolNet_2.4G",
+          signalStrength: 88,
+          security: "WPA2",
+          isConnected: false,
+        },
+        {
+          ssid: "Clinic_Network",
+          signalStrength: 72,
+          security: "WPA3",
+          isConnected: false,
+        },
+        {
+          ssid: "Guest_WiFi",
+          signalStrength: 65,
+          security: "Open",
+          isConnected: false,
+        },
+      ];
+    }
+
+    res.json({
+      success: true,
+      networks: networks.slice(0, 20), // Limit to 20 networks
+    });
+  } catch (error) {
+    console.error("❌ WiFi scan error:", error.message);
+    res.status(500).json({
+      success: false,
+      error: "Failed to scan for networks",
+    });
+  }
 });
 
 // POST: Connect to WiFi network
@@ -653,24 +688,35 @@ app.post("/api/connect", (req, res) => {
 
   console.log(`📶 Attempting to connect to WiFi: ${ssid}`);
 
-  // For development/testing, simulate success
-  // In production on Raspberry Pi, use nmcli to connect
-  // TODO: On Raspberry Pi, use:
-  // const { execSync } = require('child_process');
-  // try {
-  //   execSync(`nmcli dev wifi connect "${ssid}" password "${password}"`);
-  //   res.json({ success: true, message: `Connected to ${ssid}` });
-  // } catch (error) {
-  //   res.status(500).json({ success: false, error: error.message });
-  // }
+  try {
+    // Use nmcli to connect to the network
+    if (password) {
+      // Connect with password (WPA2/WPA3)
+      execSync(`nmcli dev wifi connect "${ssid}" password "${password}"`, {
+        timeout: 30000,
+        stdio: "pipe",
+      });
+    } else {
+      // Connect without password (Open networks)
+      execSync(`nmcli dev wifi connect "${ssid}"`, {
+        timeout: 30000,
+        stdio: "pipe",
+      });
+    }
 
-  setTimeout(() => {
+    console.log(`✅ Successfully connected to ${ssid}`);
     res.json({
       success: true,
       message: `Connected to ${ssid}`,
       ssid,
     });
-  }, 1000);
+  } catch (error) {
+    console.error(`❌ Failed to connect to ${ssid}:`, error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message || `Failed to connect to ${ssid}`,
+    });
+  }
 });
 
 // POST: Start Sensor Scan
