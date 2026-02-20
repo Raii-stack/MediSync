@@ -1,12 +1,11 @@
 /*
- * MediSync Kiosk - ESP32 Firmware (Final Synchronized Version)
- * * Hardware Map:
- * - Bus 0 (I2C): MLX90614 Thermal (SDA=21, SCL=22)
- * - Bus 1 (I2C): MAX30102 Heart (SDA=18, SCL=19)
- * - Relays: GPIO 33, 32, 17, 25
- * - RGB LEDs: Progress (12,13,14), Status (27,26,16)
- * - Buzzer: GPIO 15
- * - Emergency Btn: GPIO 23
+ * MediSync Kiosk - ESP32 Firmware (Optimized + UART Support)
+ * * FEATURES:
+ * - Dual I2C Bus (Separate Thermal & Heart Sensor)
+ * - Fast-Start Heart Rate Algorithm (Instant BPM)
+ * - Synchronized Data Streaming (Temp + BPM locked)
+ * - Full JSON Command Support (Dispense, Test, Reset)
+ * - Dual Serial Output (USB + UART)
  */
 
 #include <Wire.h>
@@ -16,408 +15,610 @@
 #include <ArduinoJson.h>
 
 // ==================== CONFIGURATION ====================
-// CRITICAL: RFID uses pins 18/19 (SPI), which conflicts with Heart Sensor (I2C).
-// Keep FALSE until Heart Sensor is moved to different pins.
-#define ENABLE_RFID false 
+#define ENABLE_RFID true // Keep FALSE (Pin 18/19 Conflict)
 
 #if ENABLE_RFID
-  #include <SPI.h>
-  #include <MFRC522.h>
-  #define RFID_SS_PIN 5
-  #define RFID_RST_PIN 4
-  MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
+#include <SPI.h>
+#include <MFRC522.h>
+#define RFID_SS_PIN 15 // Changed from 5 (Conflict with UART)
+#define RFID_RST_PIN 2 // Changed from 4 (Conflict with UART)
+MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
 #endif
 
-// ==================== PIN DEFINITIONS ====================
-// I2C Pins
+// ==================== PIN MAP ====================
+// I2C Buses
 #define THERMAL_SDA 21
 #define THERMAL_SCL 22
 #define HEART_SDA 18
 #define HEART_SCL 19
 
-// Relays (Active LOW)
+// Output Devices
 #define SLOT1_RELAY 33
 #define SLOT2_RELAY 32
-#define SLOT3_RELAY 17 
-#define SLOT4_RELAY 25 
-
-// RGB LED 1 - Scanning Progress
-#define PROGRESS_LED_R 12
-#define PROGRESS_LED_G 13
-#define PROGRESS_LED_B 14
-
-// RGB LED 2 - Status
-#define STATUS_LED_R 27
-#define STATUS_LED_G 26
-#define STATUS_LED_B 16 
-
-// Input/Output
+#define SLOT3_RELAY 25
+#define SLOT4_RELAY 26
+// GPIO 24 is safe and available (RFID uses 2 for RST, 15 for SS)
+#define SLOT5_RELAY 27
 #define BUZZER_PIN 15
-#define EMERGENCY_BTN 23
 
-// ==================== OBJECTS ====================
+// LEDs
+// Heart RGB uses 12/13/14 (strapping pins). Keep wiring stable and avoid strong pull-ups/downs.
+#define HEART_R 17
+#define HEART_G 5
+#define HEART_B 16
+// RFID RGB uses 27/26/16 (safe output pins)
+#define RFID_R 12
+#define RFID_G 13
+#define RFID_B 14
+
+// LED wiring: set true if LEDs are active-low (common anode)
+#define LED_ACTIVE_LOW true
+
+// Input
+#define EMERGENCY_BTN 34
+
+// UART (Serial2) - Remapped to avoid Relay/LED conflict on 16/17
+#define UART_RX 1
+#define UART_TX 3
+
+// ==================== GLOBAL OBJECTS ====================
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 MAX30105 particleSensor;
-
-// Separate I2C Buses
 TwoWire I2C_Thermal = TwoWire(0);
 TwoWire I2C_Heart = TwoWire(1);
 
 // ==================== VARIABLES ====================
-// Heart Rate (Reduced buffer for faster synchronization)
-const byte RATE_SIZE = 4; 
+const byte RATE_SIZE = 4;
 byte rates[RATE_SIZE];
 byte rateSpot = 0;
 long lastBeat = 0;
 float beatsPerMinute;
 int beatAvg;
 
-// State Machine
-enum ScanState { IDLE, SCANNING_RFID, READING_VITALS, COMPLETE };
+enum ScanState
+{
+  IDLE,
+  READING_VITALS
+};
 ScanState currentState = IDLE;
 
-// Timers & Flags
-String lastRFID = "";
-unsigned long lastRFIDTime = 0;
+// Flags & Timers
 bool isBlinkingHeartLED = false;
 unsigned long lastBlinkTime = 0;
 bool blinkLEDState = false;
-
-// Emergency Button
 bool lastEmergencyState = HIGH;
 unsigned long lastEmergencyDebounce = 0;
+unsigned long lastDispenseTime = 0;
 
 // ==================== SETUP ====================
-void setup() {
-  Serial.begin(115200); 
-  
-  // 1. Setup Output Pins
-  pinMode(SLOT1_RELAY, OUTPUT); digitalWrite(SLOT1_RELAY, HIGH);
-  pinMode(SLOT2_RELAY, OUTPUT); digitalWrite(SLOT2_RELAY, HIGH);
-  pinMode(SLOT3_RELAY, OUTPUT); digitalWrite(SLOT3_RELAY, HIGH);
-  pinMode(SLOT4_RELAY, OUTPUT); digitalWrite(SLOT4_RELAY, HIGH);
-  
-  pinMode(PROGRESS_LED_R, OUTPUT); pinMode(PROGRESS_LED_G, OUTPUT); pinMode(PROGRESS_LED_B, OUTPUT);
-  pinMode(STATUS_LED_R, OUTPUT);   pinMode(STATUS_LED_G, OUTPUT);   pinMode(STATUS_LED_B, OUTPUT);
-  
-  pinMode(BUZZER_PIN, OUTPUT); digitalWrite(BUZZER_PIN, LOW);
+void setup()
+{
+  // 1. Comms Init
+  Serial.begin(115200);                                // USB Serial
+  Serial2.begin(115200, SERIAL_8N1, UART_RX, UART_TX); // Hardware UART
+
+  Serial.println("\n--- MEDISYNC OPTIMIZED FIRMWARE ---");
+  Serial.println("System: UART initialized on GPIO 4(RX) & 5(TX)");
+
+  // 2. Hardware Init
+  pinMode(SLOT1_RELAY, OUTPUT);
+  digitalWrite(SLOT1_RELAY, HIGH);
+  pinMode(SLOT2_RELAY, OUTPUT);
+  digitalWrite(SLOT2_RELAY, HIGH);
+  pinMode(SLOT3_RELAY, OUTPUT);
+  digitalWrite(SLOT3_RELAY, HIGH);
+  pinMode(SLOT4_RELAY, OUTPUT);
+  digitalWrite(SLOT4_RELAY, HIGH);
+  pinMode(SLOT5_RELAY, OUTPUT);
+  digitalWrite(SLOT5_RELAY, HIGH);
+
+  pinMode(HEART_R, OUTPUT);
+  pinMode(HEART_G, OUTPUT);
+  pinMode(HEART_B, OUTPUT);
+  pinMode(RFID_R, OUTPUT);
+  pinMode(RFID_G, OUTPUT);
+  pinMode(RFID_B, OUTPUT);
+
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
   pinMode(EMERGENCY_BTN, INPUT_PULLUP);
 
-  // 2. Initialize Thermal Sensor (Bus 0)
-  I2C_Thermal.begin(THERMAL_SDA, THERMAL_SCL, 100000); 
-  if (!mlx.begin(0x5A, &I2C_Thermal)) {
-    Serial.println("ERROR: Thermal Sensor (MLX90614) not found!");
+  // 3. Thermal Sensor Init
+  I2C_Thermal.begin(THERMAL_SDA, THERMAL_SCL, 100000);
+  if (!mlx.begin(0x5A, &I2C_Thermal))
+  {
+    Serial.println("ERROR: Thermal Sensor Missing");
     playErrorTone();
-  } else {
-    Serial.println("SYSTEM: Thermal Sensor Ready (Bus 0)");
+  }
+  else
+  {
+    Serial.println("OK: Thermal Sensor Ready");
   }
 
-  // 3. Initialize Heart Sensor (Bus 1)
-  I2C_Heart.begin(HEART_SDA, HEART_SCL, 400000); 
-  if (!particleSensor.begin(I2C_Heart, I2C_SPEED_FAST)) {
-    Serial.println("ERROR: Heart Sensor (MAX30102) not found!");
+  // 4. Heart Sensor Init
+  I2C_Heart.begin(HEART_SDA, HEART_SCL, 400000);
+  if (!particleSensor.begin(I2C_Heart, I2C_SPEED_FAST))
+  {
+    Serial.println("ERROR: Heart Sensor Missing");
     playErrorTone();
-  } else {
-    Serial.println("SYSTEM: Heart Sensor Ready (Bus 1)");
-    
-    // Advanced Configuration for Accuracy
-    byte ledBrightness = 60; // 0=Off to 255=50mA
-    byte sampleAverage = 4;  // Average 4 samples
-    byte ledMode = 2;        // Red + IR
-    int sampleRate = 100;    
-    int pulseWidth = 411;    // High resolution
-    int adcRange = 4096;     
-    
-    particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);
+  }
+  else
+  {
+    Serial.println("OK: Heart Sensor Ready");
+    // Optimized Settings for Fast Detection
+    particleSensor.setup(60, 4, 2, 100, 411, 4096);
     particleSensor.setPulseAmplitudeRed(0x0A);
     particleSensor.setPulseAmplitudeGreen(0);
   }
 
-  // 4. Initialize RFID (If Enabled)
-  #if ENABLE_RFID
-    SPI.begin();
-    rfid.PCD_Init();
-    Serial.println("SYSTEM: RFID Ready");
-  #else
-    Serial.println("SYSTEM: RFID Disabled (Pin Conflict Prevention)");
-  #endif
+  // 5. RFID Init
+#if ENABLE_RFID
+  SPI.begin();
+  rfid.PCD_Init();
+  rfid.PCD_DumpVersionToSerial();
+  Serial.println("OK: RFID Reader Ready");
+#endif
 
-  // Ready
-  setRGBColor(STATUS_LED_R, STATUS_LED_G, STATUS_LED_B, 255, 0, 0); // Red (Waiting)
+  // Ready State
+  setHeartLed(255, 255, 255); // White (Idle)
+  setRfidLed(0, 255, 0);      // Green (Idle)
   playSuccessTone();
 }
 
 // ==================== MAIN LOOP ====================
-void loop() {
+void loop()
+{
   checkEmergencyButton();
-  checkCommands();
+  checkCommands(); // Checks both USB and UART for instructions
 
-  // RFID Handler
-  #if ENABLE_RFID
-    if (currentState == IDLE) checkRFID();
-  #endif
+#if ENABLE_RFID
+  checkRFID();
+#endif
 
-  // Vitals Handler
-  if (currentState == READING_VITALS) {
+  if (currentState == READING_VITALS)
+  {
     readVitalSigns();
-  } else {
-    // Keep FIFO empty when not in use so we don't read old data later
-    particleSensor.check();
-    while(particleSensor.available()) {
-        particleSensor.nextSample();
-    }
   }
+  else
+  {
+    // Idle Maintenance: Keep Sensor FIFO empty
+    particleSensor.check();
+    while (particleSensor.available())
+      particleSensor.nextSample();
 
-  // Blink LED Handler (Prompt)
-  if (isBlinkingHeartLED && currentState != READING_VITALS) {
-    if (millis() - lastBlinkTime >= 500) {
+    // Blink Logic (External Command)
+    if (isBlinkingHeartLED && (millis() - lastBlinkTime >= 500))
+    {
       lastBlinkTime = millis();
       blinkLEDState = !blinkLEDState;
-      if (blinkLEDState) setRGBColor(PROGRESS_LED_R, PROGRESS_LED_G, PROGRESS_LED_B, 255, 0, 0);
-      else setRGBColor(PROGRESS_LED_R, PROGRESS_LED_G, PROGRESS_LED_B, 0, 0, 0);
+      if (blinkLEDState)
+        setHeartLed(255, 0, 0);
+      else
+        setHeartLed(0, 0, 0);
     }
   }
 }
 
-// ==================== VITALS LOGIC (SYNCHRONIZED) ====================
-void readVitalSigns() {
-    static unsigned long scanStartTime = 0;
-    static unsigned long waitStartTime = 0;
-    static unsigned long fingerRemovedTime = 0;
-    static bool fingerDetected = false;
-    static int readingCount = 0;
-    static float tempSum = 0;
-    static int heartReadings = 0;
-    static unsigned long lastStreamTime = 0;
-    static bool initialized = false;
+// ==================== COMMAND PROCESSING (UART/USB) ====================
+void checkCommands()
+{
+  String input = "";
 
-    // --- INIT ---
-    if (!initialized) {
-        waitStartTime = millis();
-        scanStartTime = 0;
-        fingerDetected = false;
-        fingerRemovedTime = 0;
-        readingCount = 0;
-        tempSum = 0;
-        heartReadings = 0;
-        initialized = true;
-        beatAvg = 0;
-        rateSpot = 0;
-        // Flush FIFO
-        particleSensor.clearFIFO(); 
-        Serial.println("Waiting for finger...");
-    }
+  // Priority 1: Check USB Serial
+  if (Serial.available())
+    input = Serial.readStringUntil('\n');
+  // Priority 2: Check Hardware UART
+  else if (Serial2.available())
+    input = Serial2.readStringUntil('\n');
 
-    // --- READ FRESH DATA (Continuous) ---
-    long irValue = particleSensor.getIR(); 
-    
-    // Force check if sensor returns 0
-    if (irValue == 0) {
-      particleSensor.check();
-      while(particleSensor.available()) irValue = particleSensor.getIR();
-    }
-
-    // --- PHASE 1: WAITING FOR FINGER ---
-    if (!fingerDetected) {
-        // Blink Amber
-        if ((millis() / 500) % 2 == 0) setRGBColor(PROGRESS_LED_R, PROGRESS_LED_G, PROGRESS_LED_B, 255, 100, 0);
-        else setRGBColor(PROGRESS_LED_R, PROGRESS_LED_G, PROGRESS_LED_B, 0, 0, 0);
-
-        if (irValue > 50000) {
-            fingerDetected = true;
-            scanStartTime = millis();
-            Serial.println("Finger detected! Synchronizing sensors...");
-            sendJson("vitals_progress", 0, 0, 0.05); // Initial "contact" msg
-        }
-
-        if (millis() - waitStartTime > 30000) {
-            Serial.println("Timeout: No finger.");
-            finishVitals();
-            initialized = false;
-        }
-        return;
-    }
-
-    // --- PHASE 2: SCANNING (Synchronized) ---
-    
-    // Check removal
-    if (irValue < 50000) {
-        if (fingerRemovedTime == 0) fingerRemovedTime = millis();
-        if (millis() - fingerRemovedTime > 2000) {
-             Serial.println("Aborted: Finger removed.");
-             playErrorTone();
-             finishVitals();
-             initialized = false;
-        }
-        return;
-    }
-    fingerRemovedTime = 0;
-
-    // 1. Read Temp
-    float tempC = mlx.readObjectTempC();
-    if (tempC > 20 && tempC < 50) { tempSum += tempC; readingCount++; }
-
-    // 2. Read Heart Rate
-    if (checkForBeat(irValue)) {
-        long delta = millis() - lastBeat;
-        lastBeat = millis();
-        beatsPerMinute = 60 / (delta / 1000.0);
-
-        if (beatsPerMinute > 40 && beatsPerMinute < 180) {
-            rates[rateSpot++] = (byte)beatsPerMinute;
-            rateSpot %= RATE_SIZE;
-            beatAvg = 0;
-            for (byte x = 0; x < RATE_SIZE; x++) beatAvg += rates[x];
-            beatAvg /= RATE_SIZE;
-            
-            heartReadings++; 
-            
-            // Visual Progress (Green Bar)
-            float prog = min((float)heartReadings / 15.0f, 1.0f);
-            int g = 255 * prog;
-            int r = 255 * (1.0 - prog);
-            setRGBColor(PROGRESS_LED_R, PROGRESS_LED_G, PROGRESS_LED_B, r, g, 0);
-            
-            Serial.print("BPM: "); Serial.println(beatAvg);
-        }
-    }
-
-    // 3. SYNCHRONIZED STREAM (Only send if both are ready)
-    if (millis() - lastStreamTime >= 1000) {
-        lastStreamTime = millis();
-        float curTemp = readingCount > 0 ? tempSum / readingCount : 0;
-        float prog = min((float)heartReadings / 15.0f, 1.0f);
-        
-        // Strict: Only send if we have a valid Heart Rate
-        if (beatAvg > 0) {
-             sendJson("vitals_progress", curTemp, beatAvg, prog);
-        }
-    }
-
-    // 4. Completion
-    if (heartReadings >= 15) {
-        float avgTemp = readingCount > 0 ? tempSum / readingCount : 0;
-        sendJson("vitals_data", avgTemp, beatAvg, 1.0);
-        finishVitals();
-        initialized = false;
-    }
+  if (input.length() > 0)
+  {
+    input.trim();
+    if (input.startsWith("{"))
+      processJSONCommand(input);
+  }
 }
 
-void finishVitals() {
-    setRGBColor(PROGRESS_LED_R, PROGRESS_LED_G, PROGRESS_LED_B, 0, 255, 0); // Green
+void processJSONCommand(String json)
+{
+  StaticJsonDocument<200> doc;
+  DeserializationError error = deserializeJson(doc, json);
+
+  if (error)
+  {
+    Serial.print("JSON Error: ");
+    Serial.println(error.c_str());
+    return;
+  }
+
+  String cmd = doc["command"];
+
+  if (cmd == "start_vitals")
+  {
+    Serial.println("CMD: Start Vitals");
+    currentState = READING_VITALS;
+    setHeartLed(255, 0, 0); // Start red
+  }
+  else if (cmd == "session_start")
+  {
+    setRfidLed(255, 0, 0); // Red during kiosk session
+  }
+  else if (cmd == "session_end")
+  {
+    setRfidLed(0, 255, 0); // Green when idle
+  }
+  else if (cmd == "dispense")
+  {
+    int slot = doc["slot"];
+    dispense(slot);
+  }
+  else if (cmd == "blink_heart_led")
+  {
+    isBlinkingHeartLED = true;
+  }
+  else if (cmd == "stop_blink_led")
+  {
+    isBlinkingHeartLED = false;
+    setHeartLed(0, 0, 0);
+  }
+  else if (cmd == "reset")
+  {
+    currentState = IDLE;
+    setRfidLed(0, 255, 0);
+    setHeartLed(255, 255, 255);
+  }
+}
+
+// ==================== OPTIMIZED VITALS ENGINE ====================
+void readVitalSigns()
+{
+  static unsigned long scanStart = 0;
+  static unsigned long waitStart = 0;
+  static unsigned long fingerRemovedTime = 0;
+  static bool fingerDetected = false;
+  static bool firstReading = true; // Flag for Fast Start
+  static int readingCount = 0;
+  static float tempSum = 0;
+  static int heartReadings = 0;
+  static unsigned long lastStreamTime = 0;
+  static bool initialized = false;
+
+  // --- INIT ---
+  if (!initialized)
+  {
+    waitStart = millis();
+    scanStart = 0;
+    fingerDetected = false;
+    fingerRemovedTime = 0;
+    readingCount = 0;
+    tempSum = 0;
+    heartReadings = 0;
+    initialized = true;
+    firstReading = true;
+    beatAvg = 0;
+    rateSpot = 0;
+    particleSensor.clearFIFO();
+    sendJson("status", "waiting_for_finger", 0, 0);
+  }
+
+  // --- SENSOR READ ---
+  long irValue = particleSensor.getIR();
+  if (irValue == 0)
+  {
+    particleSensor.check();
+    while (particleSensor.available())
+      irValue = particleSensor.getIR();
+  }
+
+  // --- PHASE 1: WAIT ---
+  if (!fingerDetected)
+  {
+    // Amber Blink
+    if ((millis() / 500) % 2 == 0)
+      setHeartLed(255, 100, 0);
+    else
+      setHeartLed(0, 0, 0);
+
+    if (irValue > 50000)
+    {
+      fingerDetected = true;
+      scanStart = millis();
+      sendJson("vitals_progress", 0, 0, 0.05);
+    }
+    if (millis() - waitStart > 30000)
+    { // Timeout
+      finishVitals(false);
+      initialized = false;
+    }
+    return;
+  }
+
+  // --- PHASE 2: SCAN ---
+  if (irValue < 50000)
+  {
+    if (fingerRemovedTime == 0)
+      fingerRemovedTime = millis();
+    if (millis() - fingerRemovedTime > 2000)
+    {
+      finishVitals(false);
+      initialized = false;
+    }
+    return;
+  }
+  fingerRemovedTime = 0;
+
+  // Temp Read
+  float tempC = mlx.readObjectTempC();
+  if (tempC > 20 && tempC < 50)
+  {
+    tempSum += tempC;
+    readingCount++;
+  }
+
+  // Heart Rate (FAST START ALGORITHM)
+  if (checkForBeat(irValue))
+  {
+    long delta = millis() - lastBeat;
+    lastBeat = millis();
+    beatsPerMinute = 60 / (delta / 1000.0);
+
+    if (beatsPerMinute > 40 && beatsPerMinute < 180)
+    {
+      // Instant Buffer Fill on First Beat
+      if (firstReading)
+      {
+        for (byte i = 0; i < RATE_SIZE; i++)
+          rates[i] = (byte)beatsPerMinute;
+        firstReading = false;
+      }
+      else
+      {
+        rates[rateSpot++] = (byte)beatsPerMinute;
+        rateSpot %= RATE_SIZE;
+      }
+
+      // Average
+      beatAvg = 0;
+      for (byte x = 0; x < RATE_SIZE; x++)
+        beatAvg += rates[x];
+      beatAvg /= RATE_SIZE;
+      heartReadings++;
+
+      // Visuals
+      float prog = min((float)heartReadings / 10.0f, 1.0f);
+      int g = 255 * prog;
+      int r = 255 * (1.0 - prog);
+      setHeartLed(r, g, 0);
+    }
+  }
+
+  // Sync Stream (1Hz)
+  if (millis() - lastStreamTime >= 1000)
+  {
+    lastStreamTime = millis();
+    float curTemp = readingCount > 0 ? tempSum / readingCount : 0;
+    float prog = min((float)heartReadings / 10.0f, 1.0f);
+
+    // Only send if we have valid Heart Rate data
+    if (beatAvg > 0)
+      sendJson("vitals_progress", curTemp, beatAvg, prog);
+  }
+
+  // Done (10 valid beats)
+  if (heartReadings >= 10)
+  {
+    float avgTemp = readingCount > 0 ? tempSum / readingCount : 0;
+    sendJson("vitals_data", avgTemp, beatAvg, 1.0);
+    finishVitals(true);
+    initialized = false;
+  }
+}
+
+void finishVitals(bool success)
+{
+  if (success)
+  {
+    setHeartLed(0, 255, 0);
     playCompleteTone();
     delay(1000);
-    setRGBColor(PROGRESS_LED_R, PROGRESS_LED_G, PROGRESS_LED_B, 0, 0, 0);
-    setRGBColor(STATUS_LED_R, STATUS_LED_G, STATUS_LED_B, 255, 0, 0); // Back to Red
-    currentState = IDLE;
+  }
+  else
+  {
+    setHeartLed(255, 0, 0);
+    playErrorTone();
+    delay(1000);
+  }
+  setHeartLed(255, 255, 255);
+  setRfidLed(0, 255, 0);
+  currentState = IDLE;
 }
 
-// ==================== COMMANDS & HELPERS ====================
-void checkCommands() {
-    if (Serial.available()) {
-        String input = Serial.readStringUntil('\n');
-        input.trim();
-        if (!input.startsWith("{")) return;
+// ==================== DISPENSER LOGIC ====================
+void dispense(int slot)
+{
+  if (millis() - lastDispenseTime < 2000)
+    return; // Debounce
+  lastDispenseTime = millis();
 
-        StaticJsonDocument<200> doc;
-        deserializeJson(doc, input);
-        String cmd = doc["command"];
+  int pin = -1;
+  if (slot == 1)
+    pin = SLOT1_RELAY;
+  else if (slot == 2)
+    pin = SLOT2_RELAY;
+  else if (slot == 3)
+    pin = SLOT3_RELAY;
+  else if (slot == 4)
+    pin = SLOT4_RELAY;
+  else if (slot == 5)
+    pin = SLOT5_RELAY;
 
-        if (cmd == "dispense") {
-            int slot = doc["slot"];
-            dispense(slot);
-        }
-        else if (cmd == "start_vitals") currentState = READING_VITALS;
-        else if (cmd == "blink_heart_led") isBlinkingHeartLED = true;
-        else if (cmd == "stop_blink_led") { isBlinkingHeartLED = false; setRGBColor(12,13,14,0,0,0); }
-    }
-}
+  if (pin != -1)
+  {
+    Serial.print("Dispensing Slot ");
+    Serial.println(slot);
+    playDispensingTone();
+    digitalWrite(pin, LOW);  // Activate
+    delay(2000);             // Dispense duration
+    digitalWrite(pin, HIGH); // Deactivate
 
-void dispense(int slot) {
-    int pin = -1;
-    if (slot == 1) pin = SLOT1_RELAY;
-    else if (slot == 2) pin = SLOT2_RELAY;
-    else if (slot == 3) pin = SLOT3_RELAY;
-    else if (slot == 4) pin = SLOT4_RELAY;
-
-    if (pin != -1) {
-        Serial.print("Dispensing Slot "); Serial.println(slot);
-        playDispensingTone();
-        digitalWrite(pin, LOW); // Active
-        delay(2000);
-        digitalWrite(pin, HIGH); // Off
-        
-        StaticJsonDocument<200> doc;
-        doc["event"] = "dispense_complete";
-        doc["slot"] = slot;
-        String out; serializeJson(doc, out);
-        Serial.println(out);
-    }
-}
-
-// ==================== HARDWARE HELPERS ====================
-void setRGBColor(int rPin, int gPin, int bPin, int r, int g, int b) {
-    analogWrite(rPin, r); analogWrite(gPin, g); analogWrite(bPin, b);
-}
-
-void sendJson(String event, float temp, int hr, float prog) {
     StaticJsonDocument<200> doc;
-    doc["event"] = event;
-    doc["temperature"] = ((int)(temp*10))/10.0;
-    doc["heartRate"] = hr;
-    doc["progress"] = prog;
-    String out; serializeJson(doc, out);
-    Serial.println(out);
+    doc["event"] = "dispense_complete";
+    doc["slot"] = slot;
+    String out;
+    serializeJson(doc, out);
+    Serial.println(out);  // To USB
+    Serial2.println(out); // To UART
+  }
 }
 
-void checkEmergencyButton() {
-    bool state = digitalRead(EMERGENCY_BTN);
-    if (state == LOW && lastEmergencyState == HIGH) {
-        if (millis() - lastEmergencyDebounce > 50) {
-            Serial.println("EMERGENCY!");
-            playEmergencyTone();
-            StaticJsonDocument<200> doc; doc["event"] = "emergency";
-            String out; serializeJson(doc, out); Serial.println(out);
-        }
-        lastEmergencyDebounce = millis();
+// ==================== HELPERS ====================
+void writeRgb(int rPin, int gPin, int bPin, int r, int g, int b)
+{
+  if (LED_ACTIVE_LOW)
+  {
+    analogWrite(rPin, 255 - r);
+    analogWrite(gPin, 255 - g);
+    analogWrite(bPin, 255 - b);
+    return;
+  }
+  analogWrite(rPin, r);
+  analogWrite(gPin, g);
+  analogWrite(bPin, b);
+}
+
+void setHeartLed(int r, int g, int b)
+{
+  writeRgb(HEART_R, HEART_G, HEART_B, r, g, b);
+}
+
+void setRfidLed(int r, int g, int b)
+{
+  writeRgb(RFID_R, RFID_G, RFID_B, r, g, b);
+}
+
+void sendJson(String event, String status, int val1, int val2)
+{
+  StaticJsonDocument<200> doc;
+  doc["event"] = event;
+  doc["status"] = status;
+  String out;
+  serializeJson(doc, out);
+  Serial.println(out);
+  Serial2.println(out);
+}
+
+void sendJson(String event, float temp, int hr, float prog)
+{
+  StaticJsonDocument<200> doc;
+  doc["event"] = event;
+  doc["temperature"] = ((int)(temp * 10)) / 10.0;
+  doc["heartRate"] = hr;
+  doc["progress"] = prog;
+  String out;
+  serializeJson(doc, out);
+  Serial.println(out);
+  Serial2.println(out);
+}
+
+void checkEmergencyButton()
+{
+  bool state = digitalRead(EMERGENCY_BTN);
+  if (state == LOW && lastEmergencyState == HIGH)
+  {
+    if (millis() - lastEmergencyDebounce > 50)
+    {
+      playEmergencyTone();
+      StaticJsonDocument<200> doc;
+      doc["event"] = "emergency";
+      String out;
+      serializeJson(doc, out);
+      Serial.println(out);
+      Serial2.println(out);
     }
-    lastEmergencyState = state;
+    lastEmergencyDebounce = millis();
+  }
+  lastEmergencyState = state;
 }
 
-// ==================== TONES ====================
-void playSuccessTone() { tone(BUZZER_PIN, 1000, 100); delay(120); tone(BUZZER_PIN, 1500, 100); }
-void playErrorTone() { tone(BUZZER_PIN, 1500, 150); delay(170); tone(BUZZER_PIN, 800, 150); }
-void playCompleteTone() { tone(BUZZER_PIN, 1000, 200); delay(220); tone(BUZZER_PIN, 1500, 200); }
-void playDispensingTone() { tone(BUZZER_PIN, 1200, 300); }
-void playEmergencyTone() { tone(BUZZER_PIN, 2000, 100); delay(100); tone(BUZZER_PIN, 2000, 100); }
-
-// ==================== RFID (Keep disabled for now) ====================
 #if ENABLE_RFID
-void checkRFID() {
-    if (!rfid.PICC_IsNewCardPresent()) return;
-    if (!rfid.PICC_ReadCardSerial()) return;
-    
-    String uid = "";
-    for (byte i = 0; i < rfid.uid.size; i++) {
-        uid += String(rfid.uid.uidByte[i] < 0x10 ? "0" : "");
-        uid += String(rfid.uid.uidByte[i], HEX);
-    }
-    uid.toUpperCase();
-    
-    if (uid != lastRFID && (millis() - lastRFIDTime > 2000)) {
-        lastRFID = uid;
-        lastRFIDTime = millis();
-        playSuccessTone();
-        
-        StaticJsonDocument<200> doc;
-        doc["event"] = "rfid_scan";
-        doc["uid"] = uid;
-        String out; serializeJson(doc, out);
-        Serial.println(out);
-        
-        currentState = READING_VITALS;
-    }
-    rfid.PICC_HaltA();
-    rfid.PCD_StopCrypto1();
+void checkRFID()
+{
+  static unsigned long lastRfidRead = 0;
+
+  // Prevent reading too frequently (debounce)
+  if (millis() - lastRfidRead < 1000)
+    return;
+
+  // Look for new cards
+  if (!rfid.PICC_IsNewCardPresent())
+    return;
+
+  // Attempt to read card
+  if (!rfid.PICC_ReadCardSerial())
+    return;
+
+  lastRfidRead = millis();
+
+  // Build UID string
+  String uid = "";
+  for (byte i = 0; i < rfid.uid.size; i++)
+  {
+    if (rfid.uid.uidByte[i] < 0x10)
+      uid += "0";
+    uid += String(rfid.uid.uidByte[i], HEX);
+  }
+  uid.toUpperCase();
+
+  // Flash RFID LED Blue
+  setRfidLed(0, 0, 255);
+  tone(BUZZER_PIN, 1500, 100);
+
+  // Send JSON event
+  StaticJsonDocument<200> doc;
+  doc["event"] = "rfid_scan";
+  doc["uid"] = uid;
+  String out;
+  serializeJson(doc, out);
+  Serial.println(out);
+  Serial2.println(out);
+
+  // Print to console for debugging
+  Serial.print("RFID Card Detected: ");
+  Serial.println(uid);
+
+  delay(300);
+  setRfidLed(0, 255, 0); // Back to green
+
+  // Halt PICC
+  rfid.PICC_HaltA();
+  // Stop encryption on PCD
+  rfid.PCD_StopCrypto1();
 }
 #endif
+
+// ==================== TONES ====================
+void playSuccessTone()
+{
+  tone(BUZZER_PIN, 1000, 100);
+  delay(120);
+  tone(BUZZER_PIN, 1500, 100);
+}
+void playErrorTone()
+{
+  tone(BUZZER_PIN, 1500, 150);
+  delay(170);
+  tone(BUZZER_PIN, 800, 150);
+}
+void playCompleteTone()
+{
+  tone(BUZZER_PIN, 1000, 200);
+  delay(220);
+  tone(BUZZER_PIN, 1500, 200);
+}
+void playDispensingTone() { tone(BUZZER_PIN, 1200, 300); }
+void playEmergencyTone()
+{
+  tone(BUZZER_PIN, 2000, 100);
+  delay(100);
+  tone(BUZZER_PIN, 2000, 100);
+}

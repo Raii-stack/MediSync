@@ -4,6 +4,7 @@ const { Server } = require("socket.io");
 const { io: ioClient } = require("socket.io-client");
 const cors = require("cors");
 const { execSync } = require("child_process");
+const { createClient } = require("@supabase/supabase-js");
 require("dotenv").config();
 const db = require("./database");
 const hardware = require("./serial");
@@ -11,6 +12,80 @@ const hardware = require("./serial");
 // Initialize App
 const app = express();
 const KIOSK_ID = process.env.KIOSK_ID || "kiosk-001";
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_ANON_KEY;
+const supabase =
+  supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+
+function pushKioskLogToCloud(payload, onSuccess) {
+  if (!supabase) return;
+
+  supabase.from("kiosk_logs").insert([payload]).then(({ error }) => {
+    if (error) {
+      console.error("[CLOUD] Failed to write kiosk log:", error.message);
+      return;
+    }
+
+    if (onSuccess) onSuccess();
+  });
+}
+
+function logUnregisteredRfid(uid, timestamp) {
+  const payload = {
+    kiosk_id: KIOSK_ID,
+    student_id: null,
+    unregistered_rfid_uid: uid,
+    symptoms_reported: [],
+    pain_scale: null,
+    temp_reading: null,
+    heart_rate_bpm: null,
+    medicine_dispensed: null,
+    created_at: timestamp,
+  };
+
+  db.run(
+    `
+      INSERT INTO kiosk_logs 
+      (student_id, unregistered_rfid_uid, symptoms, pain_scale, temp_reading, heart_rate, medicine_dispensed, slot_used, synced, created_at) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+    `,
+    [
+      null,
+      uid,
+      "",
+      null,
+      null,
+      null,
+      null,
+      null,
+      timestamp,
+    ],
+    function (err) {
+      if (err) {
+        console.error("Error logging unregistered RFID:", err.message);
+        pushKioskLogToCloud(payload);
+        return;
+      }
+
+      const localLogId = this.lastID;
+
+      pushKioskLogToCloud(payload, () => {
+        db.run(
+          "UPDATE kiosk_logs SET synced = 1 WHERE id = ?",
+          [localLogId],
+          (syncErr) => {
+            if (syncErr) {
+              console.error(
+                "Error marking unregistered RFID log as synced:",
+                syncErr.message,
+              );
+            }
+          },
+        );
+      });
+    },
+  );
+}
 
 // Connect to Clinic Socket (for emergency alerts)
 const CLINIC_SOCKET_URL = process.env.CLINIC_SOCKET_URL;
@@ -164,6 +239,10 @@ hardware.onData((event) => {
     const uid = event.uid;
     if (!uid) return;
 
+    if (hardware.sessionStart) {
+      hardware.sessionStart();
+    }
+
     db.get(
       "SELECT * FROM students_cache WHERE rfid_uid = ?",
       [uid],
@@ -185,6 +264,8 @@ hardware.onData((event) => {
           console.log(`⚠️  Unknown RFID: ${uid} - Caching for sync`);
           const timestamp = new Date().toISOString();
           const tempStudentId = `UNCACHED_${uid}_${Date.now()}`;
+
+          logUnregisteredRfid(uid, timestamp);
 
           db.run(
             `INSERT INTO students_cache (student_id, rfid_uid, first_name, last_name, section, medical_flags) 
@@ -574,12 +655,13 @@ app.post("/api/dispense", (req, res) => {
       const timestamp = new Date().toISOString();
       const stmt = db.prepare(`
         INSERT INTO kiosk_logs 
-        (student_id, symptoms, pain_scale, temp_reading, heart_rate, medicine_dispensed, slot_used, synced, created_at) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+        (student_id, unregistered_rfid_uid, symptoms, pain_scale, temp_reading, heart_rate, medicine_dispensed, slot_used, synced, created_at) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
       `);
 
       stmt.run(
         student_id || "ANON",
+        null,
         Array.isArray(symptoms) ? symptoms.join(",") : symptoms || "",
         pain_level || null,
         vitals?.temp || null,
@@ -587,6 +669,89 @@ app.post("/api/dispense", (req, res) => {
         medicine,
         servoId,
         timestamp,
+        function (logErr) {
+          if (logErr) {
+            console.error("Error logging dispense:", logErr.message);
+            return;
+          }
+
+          if (!supabase) return;
+
+          const localLogId = this.lastID;
+          const symptomsArray = Array.isArray(symptoms)
+            ? symptoms
+            : typeof symptoms === "string" && symptoms.trim().length > 0
+              ? symptoms.split(",").map((s) => s.trim())
+              : [];
+
+          const logPayloadBase = {
+            kiosk_id: KIOSK_ID,
+            symptoms_reported: symptomsArray,
+            pain_scale: pain_level || null,
+            temp_reading: vitals?.temp || null,
+            heart_rate_bpm: vitals?.bpm || null,
+            medicine_dispensed: medicine,
+            unregistered_rfid_uid: null,
+            created_at: timestamp,
+          };
+
+          const localStudentId =
+            student_id && student_id !== "ANON" ? student_id : null;
+
+          const markSynced = () => {
+            db.run(
+              "UPDATE kiosk_logs SET synced = 1 WHERE id = ?",
+              [localLogId],
+              (syncErr) => {
+                if (syncErr) {
+                  console.error(
+                    "Error marking dispense log as synced:",
+                    syncErr.message,
+                  );
+                }
+              },
+            );
+          };
+
+          if (localStudentId) {
+            db.get(
+              "SELECT student_uuid FROM students_cache WHERE student_id = ?",
+              [localStudentId],
+              (uuidErr, uuidRow) => {
+                if (uuidErr) {
+                  console.error(
+                    "[CLOUD] Failed to fetch student UUID:",
+                    uuidErr.message,
+                  );
+                  pushKioskLogToCloud(
+                    {
+                      ...logPayloadBase,
+                      student_id: null,
+                    },
+                    markSynced,
+                  );
+                  return;
+                }
+
+                pushKioskLogToCloud(
+                  {
+                    ...logPayloadBase,
+                    student_id: uuidRow?.student_uuid || null,
+                  },
+                  markSynced,
+                );
+              },
+            );
+          } else {
+            pushKioskLogToCloud(
+              {
+                ...logPayloadBase,
+                student_id: null,
+              },
+              markSynced,
+            );
+          }
+        },
       );
       stmt.finalize();
 
@@ -607,6 +772,12 @@ app.get("/api/scan", (req, res) => {
 
   try {
     // Use nmcli to scan for networks on Raspberry Pi
+    try {
+      execSync("nmcli dev wifi rescan", { timeout: 10000, stdio: "pipe" });
+    } catch (rescanError) {
+      console.warn("⚠️  WiFi rescan failed:", rescanError.message);
+    }
+
     const output = execSync(
       'nmcli -t -f SSID,SIGNAL,SECURITY,ACTIVE dev wifi list 2>/dev/null || echo ""',
     )
@@ -631,35 +802,6 @@ app.get("/api/scan", (req, res) => {
           };
         })
         .filter((net) => net.ssid); // Remove empty entries
-    } else {
-      // Fallback to mock data if nmcli fails
-      console.log("⚠️  nmcli not available, returning mock networks");
-      networks = [
-        {
-          ssid: "SchoolNet_5G",
-          signalStrength: 95,
-          security: "WPA2",
-          isConnected: false,
-        },
-        {
-          ssid: "SchoolNet_2.4G",
-          signalStrength: 88,
-          security: "WPA2",
-          isConnected: false,
-        },
-        {
-          ssid: "Clinic_Network",
-          signalStrength: 72,
-          security: "WPA3",
-          isConnected: false,
-        },
-        {
-          ssid: "Guest_WiFi",
-          signalStrength: 65,
-          security: "Open",
-          isConnected: false,
-        },
-      ];
     }
 
     res.json({
@@ -739,6 +881,15 @@ app.post("/api/scan/stop", (req, res) => {
   }
 
   res.json({ success: true, message: "Scan stopped" });
+});
+
+// POST: End kiosk session (reset RFID LED)
+app.post("/api/session/end", (req, res) => {
+  console.log("🔵 SESSION_END received");
+  if (hardware.sessionEnd) {
+    hardware.sessionEnd();
+  }
+  res.json({ success: true, message: "Session ended" });
 });
 
 // POST: Emergency Alert

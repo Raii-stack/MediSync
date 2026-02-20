@@ -87,7 +87,7 @@ export function KioskLayout({
       {/* Footer - Only show version if specified */}
       {showVersion && (
         <footer className="flex-shrink-0 text-center py-4 text-gray-400 text-sm">
-          v3.0.1
+          v1.0.4
         </footer>
       )}
     </div>
