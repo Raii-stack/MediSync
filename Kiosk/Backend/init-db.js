@@ -107,6 +107,7 @@ db.run(
   CREATE TABLE IF NOT EXISTS kiosk_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     student_id TEXT,
+    unregistered_rfid_uid TEXT,
     symptoms TEXT,
     pain_scale INTEGER,
     temp_reading DECIMAL,
@@ -252,6 +253,7 @@ function seedKioskSlots() {
         { slot_id: 2, medicine_name: "Neozep", current_stock: 50 },
         { slot_id: 3, medicine_name: "Buscopan", current_stock: 30 },
         { slot_id: 4, medicine_name: "Cetirizine", current_stock: 30 },
+        { slot_id: 5, medicine_name: "Bioflu", current_stock: 30 },
       ];
 
       const stmt = db.prepare(

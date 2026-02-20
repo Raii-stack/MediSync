@@ -64,6 +64,22 @@ export function KioskProvider({ children }: { children: ReactNode }) {
     useState<Medicine | null>(null);
   const [dispensingSlot, setDispensingSlot] = useState<number | null>(null);
 
+  const ensureSlots = (items: SlotConfig[]) => {
+    const filled = [...items];
+    for (let id = 1; id <= 5; id += 1) {
+      if (!filled.find((slot) => slot.id === id)) {
+        filled.push({
+          id,
+          medicine: null,
+          stock: 0,
+          maxStock: 100,
+          threshold: 5,
+        });
+      }
+    }
+    return filled.sort((a, b) => a.id - b.id);
+  };
+
   // Load slots from backend
   const loadSlots = async () => {
     try {
@@ -87,17 +103,19 @@ export function KioskProvider({ children }: { children: ReactNode }) {
           threshold: 5,
         }));
 
-        setSlots(transformedSlots);
+        setSlots(ensureSlots(transformedSlots));
       }
     } catch (error) {
       console.error("Failed to load slots:", error);
       // Set default empty slots on error
-      setSlots([
-        { id: 1, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
-        { id: 2, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
-        { id: 3, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
-        { id: 4, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
-      ]);
+      setSlots(
+        ensureSlots([
+          { id: 1, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
+          { id: 2, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
+          { id: 3, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
+          { id: 4, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
+        ]),
+      );
     }
   };
 

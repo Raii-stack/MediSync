@@ -44,6 +44,22 @@ export function AdminScreen() {
   const [wifiSettingsOpen, setWiFiSettingsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  const ensureSlots = (items: SlotConfig[]) => {
+    const filled = [...items];
+    for (let id = 1; id <= 5; id += 1) {
+      if (!filled.find((slot) => slot.id === id)) {
+        filled.push({
+          id,
+          medicine: null,
+          stock: 0,
+          maxStock: 100,
+          threshold: 5,
+        });
+      }
+    }
+    return filled.sort((a, b) => a.id - b.id);
+  };
+
   // Fetch slots from backend on mount
   useEffect(() => {
     loadSlots();
@@ -72,18 +88,20 @@ export function AdminScreen() {
           threshold: 5, // Default threshold
         }));
 
-        setSlots(transformedSlots);
+        setSlots(ensureSlots(transformedSlots));
       }
     } catch (error) {
       console.error("Failed to load slots:", error);
       toast.error("Failed to load slots from backend");
       // Set default empty slots
-      setSlots([
-        { id: 1, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
-        { id: 2, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
-        { id: 3, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
-        { id: 4, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
-      ]);
+      setSlots(
+        ensureSlots([
+          { id: 1, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
+          { id: 2, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
+          { id: 3, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
+          { id: 4, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
+        ]),
+      );
     } finally {
       setIsLoading(false);
     }

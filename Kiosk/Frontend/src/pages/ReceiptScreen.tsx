@@ -11,14 +11,17 @@ import {
   Building,
   Activity,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useKiosk } from "../contexts/KioskContext";
+import axios from "axios";
+import { API_BASE_URL } from "../config/api";
 
 export function ReceiptScreen() {
   const navigate = useNavigate();
   const [countdown, setCountdown] = useState(10);
   const { recommendedMedicine, selectedSymptoms, painLevel, vitalSigns } =
     useKiosk();
+  const sessionEndedRef = useRef(false);
 
   // Get student info from session storage
   const studentData = sessionStorage.getItem("currentStudent");
@@ -46,9 +49,23 @@ export function ReceiptScreen() {
 
   const painStatus = getPainStatus();
 
+  const endSession = useCallback(async () => {
+    if (sessionEndedRef.current) return;
+    sessionEndedRef.current = true;
+    try {
+      await axios.post(`${API_BASE_URL}/api/session/end`);
+    } catch (error) {
+      console.error("Session end error:", error);
+    }
+  }, []);
+
+  const handleComplete = useCallback(() => {
+    endSession().finally(() => navigate("/"));
+  }, [endSession, navigate]);
+
   useEffect(() => {
     if (countdown === 0) {
-      navigate("/");
+      handleComplete();
       return;
     }
 
@@ -57,7 +74,7 @@ export function ReceiptScreen() {
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [countdown, navigate]);
+  }, [countdown, handleComplete]);
 
   return (
     <KioskLayout showEmergency={false}>
@@ -228,7 +245,7 @@ export function ReceiptScreen() {
 
         {/* Action Button */}
         <button
-          onClick={() => navigate("/")}
+          onClick={handleComplete}
           className="bg-gradient-to-r from-[#4A90E2] to-[#357ABD] hover:from-[#357ABD] hover:to-[#2868A8] text-white px-12 py-4 rounded-2xl shadow-xl transition-all hover:scale-105 active:scale-95 flex items-center gap-2 font-bold text-lg mb-3"
         >
           <Check className="w-5 h-5" />

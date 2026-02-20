@@ -44,6 +44,20 @@ const supabase =
 
 const KIOSK_ID = process.env.KIOSK_ID || "kiosk-001";
 const SYNC_INTERVAL = (process.env.SYNC_INTERVAL || 60) * 1000; // Default 60 seconds
+let wasOffline = false;
+
+async function isCloudAvailable() {
+  try {
+    const { error } = await supabase
+      .from("kiosks")
+      .select("kiosk_id")
+      .limit(1);
+
+    return !error;
+  } catch (err) {
+    return false;
+  }
+}
 
 // ============================================================================
 // SYNC AGENT: Runs every SYNC_INTERVAL milliseconds
@@ -54,6 +68,23 @@ async function syncData() {
     console.log("[SYNC] Supabase not configured. Skipping sync.");
     return;
   }
+
+  const cloudAvailable = await isCloudAvailable();
+
+  if (!cloudAvailable) {
+    if (!wasOffline) {
+      console.warn("[SYNC] Cloud unavailable. Offline mode enabled.");
+    }
+    wasOffline = true;
+    return;
+  }
+
+  if (!wasOffline) {
+    console.log("[SYNC] Cloud online. Sync idle.");
+    return;
+  }
+
+  wasOffline = false;
 
   try {
     console.log(
@@ -264,6 +295,7 @@ async function pushKioskLogs() {
             temp_reading: row.temp_reading,
             heart_rate_bpm: row.heart_rate,
             medicine_dispensed: row.medicine_dispensed,
+            unregistered_rfid_uid: row.unregistered_rfid_uid || null,
             created_at: row.created_at,
           }));
 

@@ -93,6 +93,7 @@ create table public.kiosk_logs (
   id uuid default uuid_generate_v4() primary key,
   kiosk_id text references public.kiosks(kiosk_id),
   student_id uuid references public.students(id),
+  unregistered_rfid_uid text,
   symptoms_reported jsonb, -- Stores ["Headache", "Fever"]
   pain_scale int,          -- Fixed: Changed from text to int
   temp_reading decimal(4,1), -- Fixed: Changed to decimal

@@ -4,7 +4,13 @@ const { ReadlineParser } = require("@serialport/parser-readline");
 // --- CONFIGURATION ---
 // Force simulation if you don't have hardware connected right now
 const FORCE_SIMULATION = false;
-const PORT_PATH = "COM3";
+const ESP32_ENABLED = process.env.ESP32_ENABLED !== "false";
+const PORT_PATH = process.env.ESP32_SERIAL_PORT || "COM3";
+const BAUD_RATE = Number(process.env.ESP32_BAUD_RATE) || 115200;
+const BASE_RECONNECT_DELAY_MS =
+  Number(process.env.ESP32_RETRY_DELAY_MS) || 2000;
+const MAX_RECONNECT_DELAY_MS =
+  Number(process.env.ESP32_RETRY_MAX_DELAY_MS) || 10000;
 
 let port = null;
 let parser = null;
@@ -15,32 +21,219 @@ let isScanning = false;
 let autoStopTimer = null;
 let stopCallback = null; // Callback when scan stops
 let rfidSimulationTimer = null;
+let reconnectTimer = null;
+let reconnectAttempt = 0;
 
-// 1. Try to Connect
-if (!FORCE_SIMULATION) {
+function attachParserListener() {
+  if (!parser || !globalCallback) return;
+
+  parser.removeAllListeners("data");
+  parser.on("data", (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    try {
+      // ESP32 sends JSON format: {"event":"rfid_scan","uid":"..."}
+      const parsed = JSON.parse(trimmed);
+
+      if (parsed.event === "rfid_scan") {
+        const uid = parsed.uid;
+        console.log(`[HARDWARE] 🔖 RFID Scanned: ${uid}`);
+        // Auto-enable scanning since ESP32 starts vitals immediately after RFID
+        isScanning = true;
+        globalCallback({ type: "login", uid });
+        return;
+      }
+
+      if (parsed.event === "vitals_progress") {
+        if (!isScanning) return;
+        console.log(
+          `[HARDWARE] 📊 Vitals progress: ${parsed.temperature}°C, ${parsed.heartRate} BPM, ${(parsed.progress * 100).toFixed(0)}%`,
+        );
+        globalCallback({
+          type: "vitals",
+          data: {
+            temp: parsed.temperature,
+            bpm: parsed.heartRate,
+            progress: parsed.progress,
+          },
+        });
+        return;
+      }
+
+      if (parsed.event === "vitals_data") {
+        if (!isScanning) return;
+        console.log(
+          `[HARDWARE] ❤️  Vitals: ${parsed.temperature}°C, ${parsed.heartRate} BPM`,
+        );
+        // Send as progress update first with 100% progress
+        globalCallback({
+          type: "vitals",
+          data: {
+            temp: parsed.temperature,
+            bpm: parsed.heartRate,
+            progress: parsed.progress || 1.0, // ESP32 sends 1.0, ensure frontend shows 100%
+          },
+        });
+        // ESP32 sends vitals_data as final averaged result - signal completion
+        console.log(
+          "[HARDWARE] ✅ ESP32 vitals reading complete, signaling completion",
+        );
+        isScanning = false;
+        globalCallback({
+          type: "vitals_complete",
+          data: {
+            temp: parsed.temperature,
+            bpm: parsed.heartRate,
+          },
+        });
+        return;
+      }
+
+      if (parsed.event === "emergency_button") {
+        console.log("[HARDWARE] 🚨 Emergency button pressed!");
+        globalCallback({
+          type: "emergency",
+          source: "physical_button",
+          data: parsed,
+        });
+        return;
+      }
+
+      if (parsed.event === "dispense_complete") {
+        console.log(`[HARDWARE] 💊 Dispense complete - Slot ${parsed.slot}`);
+        return;
+      }
+
+      if (parsed.event === "system_ready") {
+        console.log("[HARDWARE] ✅ ESP32 System Ready");
+        return;
+      }
+    } catch (e) {
+      // Not JSON, try old format for backward compatibility
+      if (trimmed.startsWith("LOGIN:")) {
+        const uid = trimmed.slice("LOGIN:".length).trim();
+        if (uid) {
+          globalCallback({ type: "login", uid });
+        }
+        return;
+      }
+
+      if (trimmed.startsWith("VITALS:")) {
+        if (!isScanning) return;
+        const jsonPayload = trimmed.slice("VITALS:".length).trim();
+        try {
+          const json = JSON.parse(jsonPayload);
+          globalCallback({ type: "vitals", data: json });
+        } catch (e) {
+          console.error("Bad VITALS payload:", jsonPayload);
+        }
+        return;
+      }
+
+      if (trimmed.startsWith("EMERGENCY:")) {
+        const payload = trimmed.slice("EMERGENCY:".length).trim();
+        console.log("[HARDWARE] 🚨 Emergency button pressed");
+        globalCallback({
+          type: "emergency",
+          source: "physical_button",
+          data: payload,
+        });
+        return;
+      }
+
+      console.log("[HARDWARE] 📡 Raw:", trimmed);
+    }
+  });
+}
+
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function scheduleReconnect(reason) {
+  if (FORCE_SIMULATION || !ESP32_ENABLED) return;
+  if (reconnectTimer) return;
+
+  reconnectAttempt += 1;
+  const delay = Math.min(
+    MAX_RECONNECT_DELAY_MS,
+    BASE_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempt - 1),
+  );
+
+  console.log(
+    `[HARDWARE] 🔁 Reconnecting to ESP32 in ${delay}ms (${reason})`,
+  );
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectToESP32();
+  }, delay);
+}
+
+function connectToESP32() {
+  if (FORCE_SIMULATION || !ESP32_ENABLED) return;
+
   try {
-    // ESP32 uses 115200 baud rate (not 9600)
-    port = new SerialPort({ path: PORT_PATH, baudRate: 115200 });
-    parser = port.pipe(new ReadlineParser({ delimiter: "\r\n" }));
-
-    console.log(`✅ Attempting connection to ESP32 on ${PORT_PATH}...`);
-
-    // Handle Async Errors (e.g., Port opens then closes, or doesn't exist)
-    port.on("error", (err) => {
-      console.log(`⚠️  ESP32 Error: ${err.message}`);
-      switchToSimulation();
+    const nextPort = new SerialPort({
+      path: PORT_PATH,
+      baudRate: BAUD_RATE,
+      autoOpen: false,
     });
 
-    port.on("close", () => {
+    const nextParser = nextPort.pipe(new ReadlineParser({ delimiter: "\r\n" }));
+
+    nextPort.on("open", () => {
+      console.log(`✅ Connected to ESP32 on ${PORT_PATH}`);
+      port = nextPort;
+      parser = nextParser;
+      reconnectAttempt = 0;
+      clearReconnectTimer();
+
+      if (isSimulationMode) {
+        stopSimulationGenerator();
+        stopRFIDSimulation();
+      }
+
+      isSimulationMode = false;
+      attachParserListener();
+    });
+
+    nextPort.on("error", (err) => {
+      console.log(`⚠️  ESP32 Error: ${err.message}`);
+      switchToSimulation();
+      scheduleReconnect("error");
+    });
+
+    nextPort.on("close", () => {
       console.log("⚠️  ESP32 Connection Closed.");
       switchToSimulation();
+      scheduleReconnect("close");
+    });
+
+    nextPort.open((err) => {
+      if (err) {
+        console.log(`⚠️  ESP32 Open Error: ${err.message}`);
+        switchToSimulation();
+        scheduleReconnect("open_error");
+      }
     });
   } catch (err) {
     console.log("⚠️  ESP32 Start Error. Switching to SIMULATION.");
-    isSimulationMode = true;
+    switchToSimulation();
+    scheduleReconnect("start_error");
   }
+}
+
+// 1. Try to Connect
+if (!FORCE_SIMULATION && ESP32_ENABLED) {
+  console.log(`✅ Attempting connection to ESP32 on ${PORT_PATH}...`);
+  connectToESP32();
 } else {
-  console.log("⚠️  FORCE_SIMULATION is ON.");
+  console.log("⚠️  FORCE_SIMULATION is ON or ESP32 disabled.");
   isSimulationMode = true;
 }
 
@@ -145,125 +338,7 @@ module.exports = {
 
     if (!isSimulationMode && port && parser) {
       // Real Mode - Parse JSON from ESP32
-      parser.on("data", (line) => {
-        const trimmed = line.trim();
-        if (!trimmed) return;
-
-        try {
-          // ESP32 sends JSON format: {"event":"rfid_scan","uid":"..."}
-          const parsed = JSON.parse(trimmed);
-
-          if (parsed.event === "rfid_scan") {
-            const uid = parsed.uid;
-            console.log(`[HARDWARE] 🔖 RFID Scanned: ${uid}`);
-            // Auto-enable scanning since ESP32 starts vitals immediately after RFID
-            isScanning = true;
-            callback({ type: "login", uid });
-            return;
-          }
-
-          if (parsed.event === "vitals_progress") {
-            if (!isScanning) return;
-            console.log(
-              `[HARDWARE] 📊 Vitals progress: ${parsed.temperature}°C, ${parsed.heartRate} BPM, ${(parsed.progress * 100).toFixed(0)}%`,
-            );
-            callback({
-              type: "vitals",
-              data: {
-                temp: parsed.temperature,
-                bpm: parsed.heartRate,
-                progress: parsed.progress,
-              },
-            });
-            return;
-          }
-
-          if (parsed.event === "vitals_data") {
-            if (!isScanning) return;
-            console.log(
-              `[HARDWARE] ❤️  Vitals: ${parsed.temperature}°C, ${parsed.heartRate} BPM`,
-            );
-            // Send as progress update first with 100% progress
-            callback({
-              type: "vitals",
-              data: {
-                temp: parsed.temperature,
-                bpm: parsed.heartRate,
-                progress: parsed.progress || 1.0, // ESP32 sends 1.0, ensure frontend shows 100%
-              },
-            });
-            // ESP32 sends vitals_data as final averaged result - signal completion
-            console.log(
-              "[HARDWARE] ✅ ESP32 vitals reading complete, signaling completion",
-            );
-            isScanning = false;
-            callback({
-              type: "vitals_complete",
-              data: {
-                temp: parsed.temperature,
-                bpm: parsed.heartRate,
-              },
-            });
-            return;
-          }
-
-          if (parsed.event === "emergency_button") {
-            console.log("[HARDWARE] 🚨 Emergency button pressed!");
-            callback({
-              type: "emergency",
-              source: "physical_button",
-              data: parsed,
-            });
-            return;
-          }
-
-          if (parsed.event === "dispense_complete") {
-            console.log(
-              `[HARDWARE] 💊 Dispense complete - Slot ${parsed.slot}`,
-            );
-            return;
-          }
-
-          if (parsed.event === "system_ready") {
-            console.log("[HARDWARE] ✅ ESP32 System Ready");
-            return;
-          }
-        } catch (e) {
-          // Not JSON, try old format for backward compatibility
-          if (trimmed.startsWith("LOGIN:")) {
-            const uid = trimmed.slice("LOGIN:".length).trim();
-            if (uid) {
-              callback({ type: "login", uid });
-            }
-            return;
-          }
-
-          if (trimmed.startsWith("VITALS:")) {
-            if (!isScanning) return;
-            const jsonPayload = trimmed.slice("VITALS:".length).trim();
-            try {
-              const json = JSON.parse(jsonPayload);
-              callback({ type: "vitals", data: json });
-            } catch (e) {
-              console.error("Bad VITALS payload:", jsonPayload);
-            }
-            return;
-          }
-
-          if (trimmed.startsWith("EMERGENCY:")) {
-            const payload = trimmed.slice("EMERGENCY:".length).trim();
-            console.log("[HARDWARE] 🚨 Emergency button pressed");
-            callback({
-              type: "emergency",
-              source: "physical_button",
-              data: payload,
-            });
-            return;
-          }
-
-          console.log("[HARDWARE] 📡 Raw:", trimmed);
-        }
-      });
+      attachParserListener();
       console.log("✅ Listening to Real ESP32...");
     } else {
       // Simulation Mode
@@ -412,6 +487,32 @@ module.exports = {
       return { success: true, mode: "real_hardware" };
     } else {
       console.log(`[SIM] 💡 Stop LED blinking in simulation mode`);
+      return { success: true, mode: "simulation" };
+    }
+  },
+
+  // Set RFID LED to red (session active)
+  sessionStart: () => {
+    if (!isSimulationMode && port && port.isOpen) {
+      const command = JSON.stringify({ command: "session_start" });
+      port.write(`${command}\n`);
+      console.log(`📤 Sent to ESP32: ${command}`);
+      return { success: true, mode: "real_hardware" };
+    } else {
+      console.log(`[SIM] 🔴 Session start (RFID LED red)`);
+      return { success: true, mode: "simulation" };
+    }
+  },
+
+  // Set RFID LED to green (session idle)
+  sessionEnd: () => {
+    if (!isSimulationMode && port && port.isOpen) {
+      const command = JSON.stringify({ command: "session_end" });
+      port.write(`${command}\n`);
+      console.log(`📤 Sent to ESP32: ${command}`);
+      return { success: true, mode: "real_hardware" };
+    } else {
+      console.log(`[SIM] 🟢 Session end (RFID LED green)`);
       return { success: true, mode: "simulation" };
     }
   },

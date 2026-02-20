@@ -16,6 +16,8 @@
 
 // ==================== PIN MAP ====================
 // I2C Buses
+// ==================== PIN MAP ====================
+// I2C Buses
 #define THERMAL_SDA 21
 #define THERMAL_SCL 22
 #define HEART_SDA 4   
@@ -51,12 +53,14 @@ unsigned long lastRfidRead = 0;
 #define UART_TX 1
 
 // ==================== GLOBAL OBJECTS ====================
+// ==================== GLOBAL OBJECTS ====================
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 MAX30105 particleSensor;
 TwoWire I2C_Thermal = TwoWire(0);
 TwoWire I2C_Heart = TwoWire(1);
 
 // ==================== VARIABLES ====================
+const byte RATE_SIZE = 4;
 const byte RATE_SIZE = 4;
 byte rates[RATE_SIZE];
 byte rateSpot = 0;
@@ -69,6 +73,7 @@ ScanState currentState = IDLE;
 
 bool lastEmergencyState = HIGH;
 unsigned long lastEmergencyDebounce = 0;
+unsigned long lastDispenseTime = 0;
 unsigned long lastDispenseTime = 0;
 
 // ==================== SETUP ====================
@@ -130,7 +135,8 @@ void setup() {
 }
 
 // ==================== MAIN LOOP ====================
-void loop() {
+void loop()
+{
   checkEmergencyButton();
   checkCommands(); 
 

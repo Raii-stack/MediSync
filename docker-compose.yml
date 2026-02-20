@@ -1,61 +1,49 @@
+version: "3.8"
+
 services:
   backend:
-    build:
-      context: ./Kiosk/Backend
-      dockerfile: Dockerfile
-    container_name: medisync-backend
+    image: ry4nj/medisync-backend:v1.2
+    container_name: medisync-backend-prod
     ports:
       - "3001:3001"
+    # 🔌 HARDWARE ACCESS - Map serial device
+    devices:
+      - "/dev/ttyS0:/dev/serial0"
+    # Run as root to ensure device access
+    user: "0"
+    privileged: true
     volumes:
-      - /app/node_modules
-      # Persist the app directory
-      - backend-db:/app
+      - backend-data:/app/data
+      - /run/dbus:/run/dbus
+    # Load environment variables from .env file
+    env_file:
+      - .env
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
+      - ESP32_SERIAL_PORT=/dev/serial0
+      - ESP32_BAUD_RATE=115200
+      - ESP32_ENABLED=true
+    restart: always
     networks:
       - medisync-network
-    restart: unless-stopped
-    develop:
-      watch:
-        - action: sync
-          path: ./Kiosk/Backend
-          target: /app
-          ignore:
-            - node_modules/
-            - kiosk.db
-            - kiosk.db-journal
-        - action: rebuild
-          path: ./Kiosk/Backend/package.json
 
   frontend:
-    build:
-      context: ./Kiosk/Frontend
-      dockerfile: Dockerfile
-    container_name: medisync-frontend
-    restart: unless-stopped
+    image: ry4nj/medisync-frontend:v1.3
+    container_name: medisync-frontend-prod
+    restart: always
     depends_on:
       - backend
     ports:
-      - "5173:5173"
+      - "80:5173"
     networks:
       - medisync-network
     environment:
-      - NODE_ENV=development
-      - VITE_API_BASE_URL=/api
-    develop:
-      watch:
-        - path: ./Kiosk/Frontend/package.json
-          action: rebuild
-        - path: ./Kiosk/Frontend/package-lock.json
-          action: rebuild
-        - path: ./Kiosk/Frontend
-          target: /app
-          action: sync
+      - NODE_ENV=production
 
 networks:
   medisync-network:
     driver: bridge
 
 volumes:
-  # FIX: Add '{}' to explicitly define this as a mapping
-  backend-db: {}
+  backend-data:
+    driver: local
