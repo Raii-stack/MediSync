@@ -13,9 +13,11 @@ import {
   WifiOff,
   Lock,
   RefreshCw,
+  Scan,
 } from "lucide-react";
 import { ConfigureSlotModal } from "../components/ConfigureSlotModal";
 import { WiFiSettingsModal } from "../components/WiFiSettingsModal";
+import { RfidTestModal } from "../components/RfidTestModal";
 import { toast } from "sonner";
 import { API_BASE_URL } from "../config/api";
 import axios from "axios";
@@ -42,6 +44,7 @@ export function AdminScreen() {
   const [testingSlot, setTestingSlot] = useState<number | null>(null);
   const [configuringSlot, setConfiguringSlot] = useState<number | null>(null);
   const [wifiSettingsOpen, setWiFiSettingsOpen] = useState(false);
+  const [rfidTestOpen, setRfidTestOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const ensureSlots = (items: SlotConfig[]) => {
@@ -217,6 +220,14 @@ export function AdminScreen() {
     setWiFiSettingsOpen(false);
   };
 
+  const handleRfidTestOpen = () => {
+    setRfidTestOpen(true);
+  };
+
+  const handleRfidTestClose = () => {
+    setRfidTestOpen(false);
+  };
+
   return (
     <div className="h-screen w-screen bg-gradient-to-br from-gray-50 to-blue-50 flex flex-col overflow-hidden">
       {/* Header */}
@@ -236,6 +247,13 @@ export function AdminScreen() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={handleRfidTestOpen}
+              className="flex items-center gap-2 px-4 py-2 bg-white text-[#4A90E2] hover:bg-gray-50 border-2 border-[#4A90E2] rounded-xl transition-all font-medium shadow-sm"
+            >
+              <Scan className="w-4 h-4" />
+              RFID Test
+            </button>
             <button
               onClick={handleWiFiSettingsOpen}
               className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-[#4A90E2] to-[#357ABD] hover:from-[#357ABD] hover:to-[#2868A8] rounded-xl transition-all text-white font-medium shadow-lg"
@@ -421,6 +439,12 @@ export function AdminScreen() {
       <WiFiSettingsModal
         isOpen={wifiSettingsOpen}
         onClose={handleWiFiSettingsClose}
+      />
+
+      {/* RFID Test Modal */}
+      <RfidTestModal
+        isOpen={rfidTestOpen}
+        onClose={handleRfidTestClose}
       />
     </div>
   );

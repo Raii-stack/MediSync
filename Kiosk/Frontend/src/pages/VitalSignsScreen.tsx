@@ -141,13 +141,22 @@ export function VitalSignsScreen() {
       }, 1500);
     };
 
+    const handleSensorStatus = (data: { status: string }) => {
+      if (data.status === "waiting_for_finger") {
+        setShowSensorPrompt(true);
+        setStatusText("Please place your finger on the sensor");
+      }
+    };
+
     socket.on("vitals-progress", handleVitalsProgress);
     socket.on("vitals-complete", handleVitalsComplete);
+    socket.on("sensor-status", handleSensorStatus);
 
     // Cleanup listeners on unmount
     return () => {
       socket.off("vitals-progress", handleVitalsProgress);
       socket.off("vitals-complete", handleVitalsComplete);
+      socket.off("sensor-status", handleSensorStatus);
     };
   }, [socket, navigate]);
 

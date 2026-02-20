@@ -3,6 +3,35 @@ const sqlite3 = require("sqlite3").verbose();
 const path = require("path");
 require("dotenv").config(); // Load .env file
 
+/**
+ * ============================================================================
+ * MediSync SYNC AGENT
+ * ============================================================================
+ *
+ * SYNC STRATEGY:
+ *
+ * PULL (Cloud → Local):
+ * - medicines_library: Pull all medicines from cloud to keep local copy updated
+ * - kiosk_inventory: Pull slot configurations for this kiosk to stay in sync
+ *
+ * PUSH (Local → Cloud):
+ * - kiosk_students: Push only locally registered students (not entire student DB)
+ * - kiosk_logs: Push all kiosk usage logs to cloud for analytics
+ * - kiosk_inventory: Push current stock levels (kiosk is source of truth)
+ *
+ * STUDENT CACHE STRATEGY:
+ * - students_cache: LOCAL ONLY - stores students who use this kiosk
+ * - kiosk_students: Tracks local registrations for sync to cloud
+ * - Does NOT pull entire students table from cloud
+ * - Only tracks students who physically use this kiosk
+ *
+ * This ensures:
+ * 1. Each kiosk has a lean, local cache
+ * 2. Cloud stays in sync with kiosk activity
+ * 3. Medicines and recipes are globally updated
+ * 4. Stock levels are accurate per kiosk
+ */
+
 // Open local SQLite database
 const dbPath = process.env.DB_PATH || path.join(__dirname, "kiosk.db");
 let db = null;
@@ -48,10 +77,7 @@ let wasOffline = false;
 
 async function isCloudAvailable() {
   try {
-    const { error } = await supabase
-      .from("kiosks")
-      .select("kiosk_id")
-      .limit(1);
+    const { error } = await supabase.from("kiosks").select("kiosk_id").limit(1);
 
     return !error;
   } catch (err) {
@@ -79,12 +105,12 @@ async function syncData() {
     return;
   }
 
-  if (!wasOffline) {
-    console.log("[SYNC] Cloud online. Sync idle.");
-    return;
+  if (wasOffline) {
+    console.log("[SYNC] ✅ Cloud is back online! Starting sync...");
+    wasOffline = false;
+  } else {
+    console.log("[SYNC] Cloud online. Running scheduled sync.");
   }
-
-  wasOffline = false;
 
   try {
     console.log(
@@ -97,19 +123,29 @@ async function syncData() {
     await ensureKioskExists();
 
     // =====================================================================
-    // STEP A: PULL STUDENTS FROM CLOUD FOR OFFLINE LOGIN
+    // STEP A: PULL MEDICINES FROM CLOUD (Cloud → Local)
     // =====================================================================
-    await pullStudents();
+    await pullMedicines();
 
     // =====================================================================
-    // STEP B: PUSH UNSYNCED KIOSK LOGS TO CLOUD
+    // STEP B: PULL SLOT CONFIGURATIONS FROM CLOUD (Cloud → Local)
+    // =====================================================================
+    await pullSlotConfigurations();
+
+    // =====================================================================
+    // STEP C: PUSH LOCALLY REGISTERED STUDENTS TO CLOUD
+    // =====================================================================
+    await pushLocalStudents();
+
+    // =====================================================================
+    // STEP D: PUSH UNSYNCED KIOSK LOGS TO CLOUD (Local → Cloud)
     // =====================================================================
     await pushKioskLogs();
 
     // =====================================================================
-    // STEP C: UPDATE INVENTORY LEVELS IN CLOUD
+    // STEP E: PUSH INVENTORY LEVELS TO CLOUD (Local → Cloud)
     // =====================================================================
-    await syncInventory();
+    await pushInventory();
 
     console.log("[SYNC] ✅ Sync cycle complete.\n");
   } catch (err) {
@@ -166,15 +202,16 @@ async function ensureKioskExists() {
 }
 
 // ============================================================================
-// STEP A: Pull Students from Cloud to Local Cache (for offline login)
+// STEP A: Pull Medicines from Cloud to Local (Cloud → Local)
+// Keeps medicine library up-to-date locally
 // ============================================================================
-async function pullStudents() {
+async function pullMedicines() {
   return new Promise((resolve, reject) => {
     try {
-      console.log("[SYNC-A] 📥 Pulling students from cloud...");
+      console.log("[SYNC-A] 📥 Pulling medicines from cloud...");
 
       supabase
-        .from("students")
+        .from("medicines_library")
         .select("*")
         .then(({ data, error }) => {
           if (error) {
@@ -183,64 +220,40 @@ async function pullStudents() {
           }
 
           if (!data || data.length === 0) {
-            console.log("[SYNC-A] ✓ No students to sync.");
+            console.log("[SYNC-A] ✓ No medicines to sync.");
             return resolve();
           }
 
           console.log(
-            `[SYNC-A] 📥 Found ${data.length} student(s). Updating local cache...`,
+            `[SYNC-A] 📥 Found ${data.length} medicine(s). Updating local cache...`,
           );
 
-          // Use INSERT OR REPLACE to preserve cached RFID UIDs and update with real data
+          // Use INSERT OR REPLACE to update medicines
           const stmt = db.prepare(`
-            INSERT OR REPLACE INTO students_cache 
-            (student_id, student_uuid, rfid_uid, first_name, last_name, section, medical_flags)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO medicines_library 
+            (name, description, symptoms_target, image_url)
+            VALUES (?, ?, ?, ?)
           `);
 
-          let matched = 0;
-          let added = 0;
-
-          data.forEach((student) => {
-            // Check if this student matches any cached RFID UID
-            db.get(
-              'SELECT student_id FROM students_cache WHERE rfid_uid = ? AND student_id LIKE "UNCACHED_%"',
-              [student.rfid_uid],
-              (err, row) => {
-                if (!err && row) {
-                  console.log(
-                    `[SYNC-A] 🔗 Matched cached RFID ${student.rfid_uid} with ${student.first_name} ${student.last_name}`,
-                  );
-                  matched++;
-                } else {
-                  added++;
-                }
-              },
-            );
-
+          data.forEach((medicine) => {
             stmt.run(
-              student.student_id,
-              student.id, // Store the UUID
-              student.rfid_uid,
-              student.first_name,
-              student.last_name,
-              student.section || "",
-              "", // medical_flags - can be populated from medical_history later
+              medicine.name,
+              medicine.description || "",
+              medicine.symptoms_target || "",
+              medicine.image_url || "",
             );
           });
 
           stmt.finalize((err) => {
             if (err) {
-              console.error("[SYNC-A] Failed to update students:", err.message);
+              console.error(
+                "[SYNC-A] Failed to update medicines:",
+                err.message,
+              );
             } else {
               console.log(
-                `[SYNC-A] ✅ Updated ${data.length} student(s) in local cache.`,
+                `[SYNC-A] ✅ Updated ${data.length} medicine(s) in local database.`,
               );
-              if (matched > 0) {
-                console.log(
-                  `[SYNC-A] 🔗 Matched ${matched} previously cached RFID(s) with student data.`,
-                );
-              }
             }
             resolve();
           });
@@ -253,8 +266,163 @@ async function pullStudents() {
 }
 
 // ============================================================================
-// STEP B: Push Unsynced Kiosk Logs to Cloud
+// STEP B: Pull Slot Configurations from Cloud (Cloud → Local)
+// Keeps slot assignments and max stock levels up-to-date
 // ============================================================================
+async function pullSlotConfigurations() {
+  return new Promise((resolve, reject) => {
+    try {
+      console.log("[SYNC-B] 📥 Pulling slot configurations from cloud...");
+
+      supabase
+        .from("kiosk_inventory")
+        .select("*")
+        .eq("kiosk_id", KIOSK_ID)
+        .then(({ data, error }) => {
+          if (error) {
+            console.error("[SYNC-B] Supabase error:", error.message);
+            return resolve();
+          }
+
+          if (!data || data.length === 0) {
+            console.log("[SYNC-B] ✓ No slot configurations to sync.");
+            return resolve();
+          }
+
+          console.log(
+            `[SYNC-B] 📥 Found ${data.length} slot(s). Updating local cache...`,
+          );
+
+          // Update slot configurations (medicine assignments, max_stock)
+          // Keep local current_stock unchanged - it's the source of truth
+          data.forEach((slot) => {
+            db.run(
+              `UPDATE kiosk_slots 
+               SET medicine_name = ?, max_stock = ?, synced = 1 
+               WHERE slot_id = ?`,
+              [slot.medicine_name, slot.max_stock || 50, slot.slot_id],
+              (err) => {
+                if (err) {
+                  console.error(
+                    `[SYNC-B] Failed to update slot ${slot.slot_id}:`,
+                    err.message,
+                  );
+                } else {
+                  console.log(
+                    `[SYNC-B] ✅ Updated Slot ${slot.slot_id}: ${slot.medicine_name}`,
+                  );
+                }
+              },
+            );
+          });
+
+          resolve();
+        });
+    } catch (err) {
+      console.error("[SYNC-B] Error:", err.message);
+      resolve();
+    }
+  });
+}
+
+// ============================================================================
+// STEP C: Push Locally Registered Students to Cloud (Local → Cloud)
+// Only syncs students who have been registered on THIS kiosk
+// Does NOT pull entire student database
+// ============================================================================
+async function pushLocalStudents() {
+  return new Promise((resolve, reject) => {
+    try {
+      console.log(
+        "[SYNC-C] 📤 Checking for locally registered students to push...",
+      );
+
+      // Get locally registered students from kiosk_students table that haven't been synced yet
+      db.all(
+        `SELECT * FROM kiosk_students 
+         WHERE synced = 0 
+         ORDER BY created_at DESC`,
+        async (err, rows) => {
+          if (err) {
+            console.error("[SYNC-C] Database error:", err.message);
+            return resolve();
+          }
+
+          if (!rows || rows.length === 0) {
+            console.log("[SYNC-C] ✓ No local students to push.");
+            return resolve();
+          }
+
+          console.log(
+            `[SYNC-C] 📤 Found ${rows.length} locally registered student(s). Pushing to cloud...`,
+          );
+
+          try {
+            // Transform local students for cloud
+            const studentsToSync = rows.map((student) => ({
+              student_id: student.student_id,
+              rfid_uid: student.rfid_uid,
+              first_name: student.first_name,
+              last_name: student.last_name,
+              age: student.age || null,
+              grade_level: student.grade_level || null,
+              section: student.section || "",
+              kiosk_registered: student.kiosk_registered,
+              kiosk_id: student.kiosk_id,
+              created_at: student.created_at,
+            }));
+
+            // Insert or update in cloud (kiosk_students table for tracking local registrations)
+            const { error } = await supabase
+              .from("kiosk_students")
+              .upsert(studentsToSync, { onConflict: "student_id, kiosk_id" });
+
+            if (error) {
+              console.error("[SYNC-C] Supabase error:", error.message);
+              return resolve();
+            }
+
+            // Mark students as synced in local kiosk_students table
+            const updateStmt = db.prepare(
+              `UPDATE kiosk_students SET synced = 1 WHERE synced = 0`,
+            );
+
+            updateStmt.run((err) => {
+              if (err) {
+                console.error(
+                  "[SYNC-C] Failed to mark students as synced:",
+                  err.message,
+                );
+              } else {
+                console.log(
+                  `[SYNC-C] ✅ Marked ${rows.length} student(s) as synced.`,
+                );
+                rows.forEach((student) => {
+                  console.log(
+                    `[SYNC-C] ✅ Synced local student: ${student.first_name} ${student.last_name}`,
+                  );
+                });
+              }
+            });
+
+            updateStmt.finalize();
+            resolve();
+          } catch (err) {
+            console.error("[SYNC-C] Error:", err.message);
+            resolve();
+          }
+        },
+      );
+    } catch (err) {
+      console.error("[SYNC-C] Error:", err.message);
+      resolve();
+    }
+  });
+}
+
+// ============================================================================
+// STEP D: Push Unsynced Kiosk Logs to Cloud (Local → Cloud)
+// =====================================================================
 async function pushKioskLogs() {
   return new Promise((resolve, reject) => {
     // Query logs with student UUID from cache
@@ -330,10 +498,10 @@ async function pushKioskLogs() {
 }
 
 // ============================================================================
-// STEP C: Sync Inventory — ONE-WAY: Local (SQLite) → Cloud (Supabase)
+// STEP E: Push Inventory to Cloud (Local → Cloud)
 // The Kiosk is the Source of Truth for stock levels.
 // ============================================================================
-async function syncInventory() {
+async function pushInventory() {
   return new Promise((resolve, reject) => {
     db.all(
       `
@@ -346,17 +514,17 @@ async function syncInventory() {
     `,
       async (err, rows) => {
         if (err) {
-          console.error("[SYNC-D] Database error:", err.message);
+          console.error("[SYNC-E] Database error:", err.message);
           return resolve();
         }
 
         if (rows.length === 0) {
-          console.log("[SYNC-D] ✓ No slots to sync.");
+          console.log("[SYNC-E] ✓ No slots to sync.");
           return resolve();
         }
 
         console.log(
-          `[SYNC-D] 📦 Pushing ${rows.length} slot(s) to cloud (Local → Cloud)...`,
+          `[SYNC-E] 📦 Pushing ${rows.length} slot(s) to cloud (Local → Cloud)...`,
         );
 
         try {
@@ -375,11 +543,11 @@ async function syncInventory() {
             .upsert(payload, { onConflict: "kiosk_id, slot_id" });
 
           if (error) {
-            console.error("[SYNC-D] Supabase upsert error:", error.message);
+            console.error("[SYNC-E] Supabase upsert error:", error.message);
           } else {
             rows.forEach((slot) => {
               console.log(
-                `[SYNC-D] ✅ Synced Slot ${slot.slot_id}: ${slot.medicine_name} (Stock: ${slot.current_stock})`,
+                `[SYNC-E] ✅ Synced Slot ${slot.slot_id}: ${slot.medicine_name} (Stock: ${slot.current_stock})`,
               );
             });
           }
@@ -390,17 +558,17 @@ async function syncInventory() {
             (err) => {
               if (err) {
                 console.error(
-                  "[SYNC-D] Failed to mark slots as synced:",
+                  "[SYNC-E] Failed to mark slots as synced:",
                   err.message,
                 );
               } else {
-                console.log("[SYNC-D] ✅ Marked all slots as synced");
+                console.log("[SYNC-E] ✅ Marked all slots as synced");
               }
               resolve();
             },
           );
         } catch (err) {
-          console.error("[SYNC-D] Error:", err.message);
+          console.error("[SYNC-E] Error:", err.message);
           resolve();
         }
       },

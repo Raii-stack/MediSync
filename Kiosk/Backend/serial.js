@@ -16,13 +16,11 @@ let port = null;
 let parser = null;
 let isSimulationMode = false;
 let globalCallback = null; // We save the callback here so we can restart it later
-let simulationInterval = null;
 let isScanning = false;
-let autoStopTimer = null;
 let stopCallback = null; // Callback when scan stops
-let rfidSimulationTimer = null;
 let reconnectTimer = null;
 let reconnectAttempt = 0;
+let simulationNoticeShown = false;
 
 function attachParserListener() {
   if (!parser || !globalCallback) return;
@@ -33,15 +31,31 @@ function attachParserListener() {
     if (!trimmed) return;
 
     try {
-      // ESP32 sends JSON format: {"event":"rfid_scan","uid":"..."}
+      // ESP32 sends JSON format: {"event":"rfid_scanned","uid":"..."}
+      // Older firmware may send {"event":"rfid_scan",...}
       const parsed = JSON.parse(trimmed);
 
-      if (parsed.event === "rfid_scan") {
+      if (parsed.event === "rfid_scan" || parsed.event === "rfid_scanned") {
         const uid = parsed.uid;
         console.log(`[HARDWARE] 🔖 RFID Scanned: ${uid}`);
-        // Auto-enable scanning since ESP32 starts vitals immediately after RFID
-        isScanning = true;
+        // Don't auto-enable scanning - let frontend explicitly start vitals
         globalCallback({ type: "login", uid });
+        return;
+      }
+
+      if (parsed.event === "rfid_test") {
+        const uid = parsed.uid;
+        console.log(`[HARDWARE] 🧪 RFID Test Scan: ${uid}`);
+        // Test scan - report to frontend for test mode
+        globalCallback({ type: "rfid_test", uid });
+        return;
+      }
+
+      if (parsed.event === "status") {
+        globalCallback({
+          type: "status",
+          status: parsed.status,
+        });
         return;
       }
 
@@ -90,7 +104,7 @@ function attachParserListener() {
         return;
       }
 
-      if (parsed.event === "emergency_button") {
+      if (parsed.event === "emergency_button" || parsed.event === "emergency") {
         console.log("[HARDWARE] 🚨 Emergency button pressed!");
         globalCallback({
           type: "emergency",
@@ -164,9 +178,7 @@ function scheduleReconnect(reason) {
     BASE_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempt - 1),
   );
 
-  console.log(
-    `[HARDWARE] 🔁 Reconnecting to ESP32 in ${delay}ms (${reason})`,
-  );
+  console.log(`[HARDWARE] 🔁 Reconnecting to ESP32 in ${delay}ms (${reason})`);
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -194,8 +206,7 @@ function connectToESP32() {
       clearReconnectTimer();
 
       if (isSimulationMode) {
-        stopSimulationGenerator();
-        stopRFIDSimulation();
+        simulationNoticeShown = false;
       }
 
       isSimulationMode = false;
@@ -237,98 +248,15 @@ if (!FORCE_SIMULATION && ESP32_ENABLED) {
   isSimulationMode = true;
 }
 
-// 2. Helper to Start Simulation
-function startSimulationGenerator(callback) {
-  if (simulationInterval) clearInterval(simulationInterval); // Prevent duplicates
-
-  console.log("[SIM] 🩺 Starting Fake Sensor Data Generator...");
-
-  simulationInterval = setInterval(() => {
-    const fakeData = {
-      temp: (36.0 + Math.random()).toFixed(1),
-      bpm: Math.floor(60 + Math.random() * 40),
-    };
-
-    // Print to console so you can see it working
-    console.log(`[SIM] ❤️  Generated: ${JSON.stringify(fakeData)}`);
-
-    // Send to server handler
-    if (callback) {
-      callback({ type: "vitals", data: fakeData });
-    }
-  }, 2000);
-}
-
-// Helper to simulate RFID scans (for testing without hardware)
-function startRFIDSimulation(callback) {
-  if (rfidSimulationTimer) return; // Already running
-
-  console.log("[SIM] 🔖 RFID Simulator ready - Will trigger in 3 seconds...");
-
-  rfidSimulationTimer = setTimeout(() => {
-    const fakeUID = `SIM${Math.floor(Math.random() * 10000)
-      .toString()
-      .padStart(8, "0")}`;
-    console.log(`[SIM] 🔖 Simulating RFID scan: ${fakeUID}`);
-
-    if (callback) {
-      callback({
-        type: "login",
-        uid: fakeUID,
-      });
-    }
-
-    rfidSimulationTimer = null;
-  }, 3000);
-}
-
-function stopRFIDSimulation() {
-  if (rfidSimulationTimer) {
-    clearTimeout(rfidSimulationTimer);
-    rfidSimulationTimer = null;
-    console.log("[SIM] 🛑 Stopped RFID Simulator.");
-  }
-}
-
-function stopSimulationGenerator() {
-  if (simulationInterval) {
-    clearInterval(simulationInterval);
-    simulationInterval = null;
-    console.log("[SIM] 🛑 Stopped Fake Sensor Data Generator.");
-  }
-}
-
-function clearAutoStopTimer() {
-  if (autoStopTimer) {
-    clearTimeout(autoStopTimer);
-    autoStopTimer = null;
-  }
-}
-
-function startAutoStopTimer() {
-  clearAutoStopTimer();
-  autoStopTimer = setTimeout(() => {
-    if (isScanning) {
-      console.log("[AUTO] ⏱️  Scan auto-stopped after 35 seconds.");
-      module.exports.stopScan();
-      // Notify via callback that the scan completed
-      if (stopCallback) {
-        stopCallback();
-      }
-    }
-  }, 35000);
-}
-
 // 3. Logic to Switch Modes Automatically
 function switchToSimulation() {
   if (isSimulationMode) return; // Already in sim mode
 
   isSimulationMode = true;
-  console.log("🔄 Switching to Simulation Mode now...");
-
-  if (globalCallback && isScanning) {
-    startSimulationGenerator(globalCallback);
-  }
+  simulationNoticeShown = false;
+  console.log(
+    "⚠️  Hardware offline. Simulation disabled; no fake data will be emitted.",
+  );
 }
 
 module.exports = {
@@ -341,12 +269,13 @@ module.exports = {
       attachParserListener();
       console.log("✅ Listening to Real ESP32...");
     } else {
-      // Simulation Mode
-      if (isScanning) {
-        startSimulationGenerator(callback);
+      // Hardware offline - do not emit simulated data
+      if (!simulationNoticeShown) {
+        console.log(
+          "⚠️  ESP32 not connected. Simulation disabled; no test RFID or vitals will be generated.",
+        );
+        simulationNoticeShown = true;
       }
-      // Auto-trigger RFID simulation in simulation mode
-      startRFIDSimulation(callback);
     }
   },
 
@@ -357,7 +286,7 @@ module.exports = {
       port.write(`${command}\n`);
       console.log(`📤 Sent to ESP32: ${command}`);
     } else {
-      console.log(`[SIM] 💊 Dispensing Servo ${servoId} (Fake Motor Move)`);
+      console.log("⚠️  ESP32 not connected. Dispense command not sent.");
     }
   },
 
@@ -380,25 +309,13 @@ module.exports = {
       console.log(`📤 Sent to ESP32: ${command}`);
       // No auto-stop timer for hardware - ESP32 manages its own scan duration
     } else {
-      console.log(
-        "[DEBUG] In simulation mode or no port. Starting simulation generator.",
-      );
-      // Auto-stop timer only for simulation mode
-      startAutoStopTimer();
-      if (globalCallback) {
-        startSimulationGenerator(globalCallback);
-      } else {
-        console.error(
-          "[ERROR] globalCallback is null! Cannot start simulation.",
-        );
-      }
+      console.log("⚠️  ESP32 not connected. Scan cannot start.");
     }
   },
 
   stopScan: () => {
     console.log("[DEBUG] stopScan called");
     isScanning = false;
-    clearAutoStopTimer();
     if (!isSimulationMode && port && port.isOpen) {
       console.log("✅ [HARDWARE] Sending reset to ESP32");
       // Send reset command to put ESP32 back to IDLE state
@@ -406,63 +323,13 @@ module.exports = {
       port.write(command + "\n");
       console.log(`📤 Sent to ESP32: ${command}`);
     } else {
-      stopSimulationGenerator();
+      console.log("⚠️  ESP32 not connected. Reset not sent.");
     }
   },
 
   // Register callback for when scan stops
   onStop: (callback) => {
     stopCallback = callback;
-  },
-
-  // Manually trigger RFID simulation (for testing without hardware)
-  simulateRFID: (uid = null) => {
-    if (!globalCallback) {
-      console.error("[ERROR] Cannot simulate RFID - no callback registered");
-      return false;
-    }
-
-    const fakeUID =
-      uid ||
-      `SIM${Math.floor(Math.random() * 10000)
-        .toString()
-        .padStart(8, "0")}`;
-    console.log(`[SIM] 🔖 Manual RFID simulation: ${fakeUID}`);
-
-    globalCallback({
-      type: "login",
-      uid: fakeUID,
-    });
-
-    return true;
-  },
-
-  // Send fake RFID command to real ESP32 (triggers vitals reading)
-  sendFakeRFIDToESP32: (uid = null) => {
-    const fakeUID =
-      uid ||
-      `TEST${Math.floor(Math.random() * 10000)
-        .toString()
-        .padStart(8, "0")}`;
-
-    if (!isSimulationMode && port && port.isOpen) {
-      const command = JSON.stringify({
-        command: "simulate_rfid",
-        uid: fakeUID,
-      });
-      port.write(`${command}\n`);
-      console.log(`📤 Sent fake RFID to ESP32: ${command}`);
-      return { success: true, uid: fakeUID, mode: "real_hardware" };
-    } else {
-      console.log(`[SIM] 🔖 Fake RFID in simulation mode: ${fakeUID}`);
-      if (globalCallback) {
-        globalCallback({
-          type: "login",
-          uid: fakeUID,
-        });
-      }
-      return { success: true, uid: fakeUID, mode: "simulation" };
-    }
   },
 
   // Start blinking heart rate LED (sensor prompt)
@@ -520,5 +387,31 @@ module.exports = {
   // Check if in simulation mode
   isSimulation: () => {
     return isSimulationMode;
+  },
+
+  // Enable RFID test mode (scan without affecting LED state)
+  startRfidTest: () => {
+    if (!isSimulationMode && port && port.isOpen) {
+      const command = JSON.stringify({ command: "rfid_test_start" });
+      port.write(`${command}\n`);
+      console.log(`📤 Sent to ESP32: ${command}`);
+      return { success: true, mode: "real_hardware" };
+    } else {
+      console.log(`[SIM] 🔧 RFID test mode enabled`);
+      return { success: true, mode: "simulation" };
+    }
+  },
+
+  // Disable RFID test mode
+  stopRfidTest: () => {
+    if (!isSimulationMode && port && port.isOpen) {
+      const command = JSON.stringify({ command: "rfid_test_stop" });
+      port.write(`${command}\n`);
+      console.log(`📤 Sent to ESP32: ${command}`);
+      return { success: true, mode: "real_hardware" };
+    } else {
+      console.log(`[SIM] 🔧 RFID test mode disabled`);
+      return { success: true, mode: "simulation" };
+    }
   },
 };
