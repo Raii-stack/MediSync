@@ -1080,7 +1080,8 @@ app.get("/api/scan", (req, res) => {
     }
 
     const output = execSync(
-      'nmcli -t -f SSID,SIGNAL,SECURITY,ACTIVE dev wifi list 2>/dev/null || echo ""',
+      "nmcli -t -f SSID,SIGNAL,SECURITY,ACTIVE dev wifi list",
+      { timeout: 15000, stdio: ["pipe", "pipe", "pipe"] },
     )
       .toString()
       .trim();
@@ -1088,17 +1089,23 @@ app.get("/api/scan", (req, res) => {
     let networks = [];
 
     if (output) {
-      // Parse nmcli output format: SSID:SIGNAL:SECURITY:ACTIVE
+      // Parse nmcli terse output format: SSID:SIGNAL:SECURITY:ACTIVE
+      // nmcli -t escapes literal colons as \: within field values,
+      // so we must split on unescaped colons only.
       const lines = output.split("\n").filter((line) => line.trim());
 
       networks = lines
         .map((line) => {
-          const [ssid, signal, security, active] = line.split(":");
+          // Split on colons that are NOT preceded by a backslash
+          const fields = line
+            .split(/(?<!\\):/)
+            .map((f) => f.replace(/\\:/g, ":"));
+          const [ssid, signal, security, active] = fields;
           return {
             ssid: ssid || "Hidden Network",
             signalStrength: parseInt(signal) || 0,
             security:
-              security && security !== "--" ? security.split(",")[0] : "Open",
+              security && security !== "--" ? security.split(" ")[0] : "Open",
             isConnected: active === "yes",
           };
         })

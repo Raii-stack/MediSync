@@ -1,7 +1,3 @@
-/*
- * MediSync Kiosk - ESP32 Firmware (Dual LEDs + RFID + UART on 1/3)
- */
-
 #include <Wire.h>
 #include <Adafruit_MLX90614.h>
 #include <MAX30105.h>
@@ -14,8 +10,6 @@
 #define ENABLE_RFID true
 #define LED_ACTIVE_LOW false
 
-// ==================== PIN MAP ====================
-// I2C Buses
 // ==================== PIN MAP ====================
 // I2C Buses
 #define THERMAL_SDA 21
@@ -41,7 +35,7 @@ unsigned long lastRfidRead = 0;
 #define SLOT1_ACTIVE_LOW true
 #define SLOT2_ACTIVE_LOW true
 #define SLOT3_ACTIVE_LOW true
-#define SLOT4_ACTIVE_LOW false
+#define SLOT4_ACTIVE_LOW true
 #define SLOT5_ACTIVE_LOW true
 
 // RFID Status LED
@@ -59,7 +53,6 @@ unsigned long lastRfidRead = 0;
 #define UART_RX 3
 #define UART_TX 1
 
-// ==================== GLOBAL OBJECTS ====================
 // ==================== GLOBAL OBJECTS ====================
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 MAX30105 particleSensor;
@@ -93,8 +86,6 @@ void setup()
   // Boot guard: allow strapping pins to settle before driving relays.
   delay(2000);
 
-  // We initialize Serial2 on pins 3 (RX) and 1 (TX).
-  // Note: This overrides the default USB Serial debug output on these pins.
   Serial2.begin(115200, SERIAL_8N1, UART_RX, UART_TX);
 
   // Adding a small delay to let Serial2 settle
