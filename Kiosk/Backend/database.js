@@ -1,11 +1,13 @@
 const sqlite3 = require("sqlite3").verbose();
+const path = require("path");
 
 // Connect to a file-based database
-const db = new sqlite3.Database("./kiosk.db", (err) => {
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, "kiosk.db");
+const db = new sqlite3.Database(DB_PATH, (err) => {
   if (err) {
     console.error("Error opening database " + err.message);
   } else {
-    console.log("Connected to the SQLite database.");
+    console.log(`Connected to the SQLite database at: ${DB_PATH}`);
   }
 });
 

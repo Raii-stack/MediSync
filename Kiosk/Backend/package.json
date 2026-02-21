@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node server.js & node sync.js & wait",
+    "start": "node init-db.js && node server.js & node sync.js & wait",
     "dev": "concurrently \"nodemon server.js\" \"nodemon sync.js\"",
     "server": "node server.js",
     "sync": "node sync.js",
