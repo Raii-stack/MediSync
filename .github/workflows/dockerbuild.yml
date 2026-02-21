@@ -1,0 +1,61 @@
+name: MediSync Docker Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'Kiosk/MicroControllers/esp32/**'
+
+jobs:
+  build-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Backend
+        uses: docker/build-push-action@v4
+        with:
+          context: ./Kiosk/Backend
+          file: ./Kiosk/Backend/Dockerfile.prod
+          platforms: linux/arm64 
+          push: true
+          build-args: |
+            NODE_ENV=production
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/medisync-backend:latest
+
+      - name: Build and Push Frontend
+        uses: docker/build-push-action@v4
+        with:
+          context: ./Kiosk/Frontend
+          file: ./Kiosk/Frontend/Dockerfile.prod
+          platforms: linux/arm64
+          push: true
+          build-args: |
+            NODE_ENV=production
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/medisync-frontend:latest
+
+  deploy-to-pi:
+    needs: build-docker
+    runs-on: [self-hosted, rpi-3b] 
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Pull and Restart Docker Containers
+        run: |
+          docker compose pull
+          docker compose up -d
