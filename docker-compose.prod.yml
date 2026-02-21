@@ -8,13 +8,20 @@ services:
     container_name: medisync-backend-prod
     network_mode: host
     privileged: true
-
+    user: "0"
+    devices:
+      - "/dev/ttyS0:/dev/serial0"
     volumes:
       - backend-data:/app/data
-      - /run/dbus:/run/dbus  # Required for WiFi management via NetworkManager
+      - /run/dbus:/run/dbus  
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - KIOSK_ID=${KIOSK_ID:-kiosk-001}
+      - ESP32_SERIAL_PORT=/dev/serial0
+      - ESP32_BAUD_RATE=115200
+      - ESP32_ENABLED=true
       - CLINIC_SOCKET_URL=${CLINIC_SOCKET_URL:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     restart: always
@@ -30,7 +37,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "80:5173"  # Serve on HTTP port 80 (or 443 for HTTPS)
+      - "80:5173"  
     networks:
       - medisync-network
     environment:

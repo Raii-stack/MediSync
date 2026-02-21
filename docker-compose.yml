@@ -1,6 +1,8 @@
 services:
   backend:
-    image: ry4nj/medisync-backend:latest
+    build:
+      context: ./Kiosk/Backend
+      dockerfile: Dockerfile
     container_name: medisync-backend-prod
     network_mode: host
     devices:

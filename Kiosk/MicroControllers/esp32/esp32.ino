@@ -525,7 +525,26 @@ void setColor(int rPin, int gPin, int r, int g)
   }
 }
 
-void setRfidLed(int r, int g) { setColor(RFID_R, RFID_G, r, g); }
+// RFID LED uses digitalWrite only (no PWM).
+// On ESP32, analogWrite attaches a LEDC channel that persists and
+// prevents subsequent digitalWrite from working on the same pin.
+// Since the RFID LED only needs on/off states, we avoid analogWrite entirely.
+void setRfidLed(int r, int g)
+{
+  bool rOn = (r > 0);
+  bool gOn = (g > 0);
+
+  if (LED_ACTIVE_LOW)
+  {
+    digitalWrite(RFID_R, rOn ? LOW : HIGH);
+    digitalWrite(RFID_G, gOn ? LOW : HIGH);
+  }
+  else
+  {
+    digitalWrite(RFID_R, rOn ? HIGH : LOW);
+    digitalWrite(RFID_G, gOn ? HIGH : LOW);
+  }
+}
 void setHeartLed(int r, int g) { setColor(HEART_R, HEART_G, r, g); }
 
 void setRelay(int pin, bool activeLow, bool on)
