@@ -3,8 +3,17 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install nmcli for WiFi management on Raspberry Pi
-RUN apk add --no-cache networkmanager
+# Install system dependencies for Raspberry Pi production:
+# - networkmanager: nmcli for WiFi scanning/management
+# - dbus: required for nmcli to communicate with host NetworkManager
+# - tini: proper signal handling in container
+# - udev/eudev-libs: serial device access (ESP32)
+RUN apk add --no-cache \
+    networkmanager \
+    dbus \
+    tini \
+    udev \
+    eudev-libs
 
 COPY package*.json ./
 

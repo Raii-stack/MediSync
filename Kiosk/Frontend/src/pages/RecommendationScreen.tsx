@@ -65,31 +65,6 @@ export function RecommendationScreen() {
   useEffect(() => {
     if (slots.length === 0) return; // Wait for slots to load
 
-    // Check if symptoms are severe based on pain level
-    const isSevere = painLevel >= 8;
-
-    // Check if temperature is concerning
-    const highFever = vitalSigns && vitalSigns.temperature >= 38.5;
-
-    // Check for severe symptoms that require clinic visit
-    const severeSymptoms = ["dehydration", "vomiting"];
-    const hasSevereSymptom = selectedSymptoms.some((s) =>
-      severeSymptoms.includes(s),
-    );
-
-    // If severe pain, high fever, or severe symptoms, recommend clinic
-    if (isSevere || highFever || hasSevereSymptom) {
-      setRecommendation({
-        type: "clinic",
-        reason: isSevere
-          ? "Severe pain level detected (8+/10)"
-          : highFever
-            ? "High fever detected (38.5°C or higher)"
-            : "Severe symptoms require immediate medical attention",
-      });
-      return;
-    }
-
     // Find the best available medicine for the symptoms using symptoms_target from database
     let foundMedicine: Medicine | null = null;
     let foundSlot: number | null = null;
@@ -141,7 +116,7 @@ export function RecommendationScreen() {
     }
 
     if (foundMedicine && foundSlot) {
-      // Medicine available in kiosk
+      // Medicine available in kiosk — dispense even if symptoms are severe
       setRecommendation({
         type: "medicine",
         medicine: foundMedicine,
@@ -233,6 +208,59 @@ export function RecommendationScreen() {
 
   const status = getPainStatus();
 
+  // Derive a severity theme for the medicine card based on reported symptoms + vitals
+  const getSeverityTheme = () => {
+    const severeSymptoms = ["dehydration", "vomiting", "diarrhea"];
+    const moderateSymptoms = ["fever", "abdominal", "dysmenorrhea"];
+    const isSevere =
+      painLevel >= 8 ||
+      (vitalSigns && vitalSigns.temperature >= 38.5) ||
+      selectedSymptoms.some((s) => severeSymptoms.includes(s));
+    const isModerate =
+      painLevel >= 4 ||
+      (vitalSigns && vitalSigns.temperature >= 37.5) ||
+      selectedSymptoms.some((s) => moderateSymptoms.includes(s));
+
+    if (isSevere) return {
+      border: "border-red-500",
+      glow: "from-red-500 to-rose-500",
+      gradient: "from-red-500 to-rose-500",
+      badgeBg: "bg-red-500",
+      buttonGradient: "from-red-500 to-rose-500 hover:from-red-600 hover:to-rose-600",
+      matchBg: "from-red-50 to-rose-50",
+      matchBorder: "border-red-200",
+      activityColor: "text-red-500",
+      label: "Urgent Treatment",
+      tagline: "Immediate care recommended",
+    };
+    if (isModerate) return {
+      border: "border-amber-500",
+      glow: "from-amber-400 to-orange-500",
+      gradient: "from-amber-500 to-orange-500",
+      badgeBg: "bg-amber-500",
+      buttonGradient: "from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600",
+      matchBg: "from-amber-50 to-orange-50",
+      matchBorder: "border-amber-200",
+      activityColor: "text-amber-500",
+      label: "Moderate Treatment",
+      tagline: "Monitor symptoms closely",
+    };
+    return {
+      border: "border-blue-500",
+      glow: "from-blue-400 to-sky-500",
+      gradient: "from-blue-500 to-sky-500",
+      badgeBg: "bg-blue-500",
+      buttonGradient: "from-blue-500 to-sky-500 hover:from-blue-600 hover:to-sky-600",
+      matchBg: "from-blue-50 to-sky-50",
+      matchBorder: "border-blue-200",
+      activityColor: "text-blue-500",
+      label: "Treatment Plan",
+      tagline: "Symptoms appear manageable",
+    };
+  };
+
+  const theme = getSeverityTheme();
+
   if (!recommendation) {
     return (
       <KioskLayout>
@@ -253,12 +281,12 @@ export function RecommendationScreen() {
               className={`inline-flex items-center gap-3 bg-white/80 backdrop-blur-sm px-6 py-2 rounded-full shadow-lg mb-3`}
             >
               <Activity
-                className={`w-4 h-4 ${recommendation.type === "clinic" ? "text-orange-600" : "text-[#2ECC71]"}`}
+                className={`w-4 h-4 ${recommendation.type === "clinic" ? "text-orange-600" : theme.activityColor}`}
               />
               <span className="text-sm font-medium text-gray-600 uppercase tracking-wide">
                 {recommendation.type === "clinic"
                   ? "Medical Attention Required"
-                  : "Treatment Plan"}
+                  : theme.label}
               </span>
             </div>
             <h1 className="text-4xl font-bold text-gray-800">
@@ -435,15 +463,15 @@ export function RecommendationScreen() {
                   // Medicine Card
                   <>
                     {/* Glow effect */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-[#2ECC71] to-[#27AE60] rounded-3xl blur-2xl opacity-20"></div>
+                    <div className={`absolute inset-0 bg-gradient-to-br ${theme.glow} rounded-3xl blur-2xl opacity-20`}></div>
 
                     {/* Main Card */}
-                    <div className="relative bg-white rounded-3xl border-4 border-[#2ECC71] p-8 shadow-2xl w-full">
+                    <div className={`relative bg-white rounded-3xl border-4 ${theme.border} p-8 shadow-2xl w-full`}>
                       {/* Pill Icon */}
                       <div className="flex justify-center mb-6">
                         <div className="relative">
-                          <div className="absolute inset-0 bg-gradient-to-br from-red-400 to-orange-500 rounded-2xl blur-lg opacity-30"></div>
-                          <div className="relative bg-gradient-to-br from-red-500 to-orange-500 rounded-2xl p-6 shadow-xl transform -rotate-12 hover:rotate-0 transition-transform">
+                          <div className={`absolute inset-0 bg-gradient-to-br ${theme.glow} rounded-2xl blur-lg opacity-30`}></div>
+                          <div className={`relative bg-gradient-to-br ${theme.gradient} rounded-2xl p-6 shadow-xl transform -rotate-12 hover:rotate-0 transition-transform`}>
                             <Pill
                               className="w-14 h-14 text-white"
                               strokeWidth={2}
@@ -453,17 +481,17 @@ export function RecommendationScreen() {
                       </div>
 
                       {/* Medicine Name */}
-                      <h2 className="text-5xl font-bold text-center mb-3 bg-gradient-to-r from-[#2ECC71] to-[#27AE60] bg-clip-text text-transparent">
+                      <h2 className={`text-5xl font-bold text-center mb-3 bg-gradient-to-r ${theme.gradient} bg-clip-text text-transparent`}>
                         {recommendation.medicine?.name}
                       </h2>
                       <p className="text-base text-gray-500 text-center mb-6">
-                        {recommendation.medicine?.description}
+                        {theme.tagline}
                       </p>
 
                       {/* Match Indicator */}
-                      <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-4 mb-6 border-2 border-green-200">
+                      <div className={`bg-gradient-to-r ${theme.matchBg} rounded-xl p-4 mb-6 border-2 ${theme.matchBorder}`}>
                         <div className="flex items-center gap-3 justify-center">
-                          <div className="w-7 h-7 bg-[#2ECC71] rounded-full flex items-center justify-center">
+                          <div className={`w-7 h-7 ${theme.badgeBg} rounded-full flex items-center justify-center`}>
                             <Check
                               className="w-4 h-4 text-white"
                               strokeWidth={3}
@@ -494,7 +522,7 @@ export function RecommendationScreen() {
                         <button
                           onClick={handleDispense}
                           disabled={isDispensing}
-                          className="bg-gradient-to-r from-[#2ECC71] to-[#27AE60] hover:from-[#27AE60] hover:to-[#229954] text-white py-4 rounded-2xl shadow-xl transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                          className={`bg-gradient-to-r ${theme.buttonGradient} text-white py-4 rounded-2xl shadow-xl transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
                         >
                           {isDispensing ? (
                             <>

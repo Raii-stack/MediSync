@@ -8,6 +8,7 @@ const { createClient } = require("@supabase/supabase-js");
 require("dotenv").config();
 const db = require("./database");
 const hardware = require("./serial");
+const syncService = require("./syncService");
 
 // Initialize App
 const app = express();
@@ -1388,4 +1389,11 @@ server.listen(PORT, () => {
   console.log(`✅ MediSync Backend running on http://localhost:${PORT}`);
   console.log(`🔓 CORS: Allowing all origins`);
   console.log(`🔌 Socket.IO: Available at ws://localhost:${PORT}`);
+
+  // Start edge-to-cloud sync service (shares this process's db + supabase)
+  syncService.start(db, supabase, { kioskId: KIOSK_ID });
 });
+
+// Graceful shutdown
+process.on("SIGINT",  () => { syncService.stop(); process.exit(0); });
+process.on("SIGTERM", () => { syncService.stop(); process.exit(0); });

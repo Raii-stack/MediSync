@@ -1,6 +1,4 @@
 import { ReactNode, useState } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../config/api";
 import { EmergencyButton } from "./EmergencyButton";
 import { EmergencyModal } from "./EmergencyModal";
 
@@ -19,57 +17,19 @@ export function KioskLayout({
 }: KioskLayoutProps) {
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
 
-  const handleEmergencyClick = () => {
-    setIsEmergencyModalOpen(true);
-  };
-
-  const handleEmergencyConfirm = async () => {
-    setIsEmergencyModalOpen(false);
-
-    try {
-      // Get current student_id from session storage if available
-      const currentStudent = sessionStorage.getItem("currentStudent");
-      const studentData = currentStudent ? JSON.parse(currentStudent) : null;
-      const student_id = studentData?.student_id || null;
-
-      console.log("🚨 Sending emergency alert to backend...");
-      const response = await axios.post(`${API_BASE_URL}/api/emergency`, {
-        student_id,
-      });
-
-      if (response.data.success) {
-        console.log("✅ Emergency alert sent successfully");
-        // Show success message (could replace with toast notification)
-        alert(
-          "✅ Emergency Alert Sent!\n\nThe school clinic has been notified and will respond shortly.",
-        );
-      }
-    } catch (error) {
-      console.error("❌ Failed to send emergency alert:", error);
-      alert(
-        "⚠️ Failed to send alert. Please contact clinic directly or try again.",
-      );
-    }
-  };
-
-  const handleEmergencyCancel = () => {
-    setIsEmergencyModalOpen(false);
-  };
-
   return (
     <div className="h-screen w-screen bg-gradient-to-br from-gray-50 to-blue-50 flex flex-col overflow-hidden relative">
       {/* Emergency Button Overlay */}
       {showEmergency && (
         <div className="fixed top-6 right-6 z-50">
-          <EmergencyButton onClick={handleEmergencyClick} />
+          <EmergencyButton onClick={() => setIsEmergencyModalOpen(true)} />
         </div>
       )}
 
       {/* Emergency Modal */}
       <EmergencyModal
         isOpen={isEmergencyModalOpen}
-        onClose={handleEmergencyCancel}
-        onConfirm={handleEmergencyConfirm}
+        onClose={() => setIsEmergencyModalOpen(false)}
       />
 
       {/* Greeting */}
@@ -93,3 +53,4 @@ export function KioskLayout({
     </div>
   );
 }
+

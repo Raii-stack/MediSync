@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node init-db.js && node server.js & node sync.js & wait",
-    "dev": "concurrently \"nodemon server.js\" \"nodemon sync.js\"",
+    "start": "node init-db.js && node server.js",
+    "dev": "nodemon server.js",
     "server": "node server.js",
     "sync": "node sync.js",
     "test": "echo \"Error: no test specified\" && exit 1"

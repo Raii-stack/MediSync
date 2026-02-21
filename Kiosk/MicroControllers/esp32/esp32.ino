@@ -105,8 +105,15 @@ void setup()
 
   pinMode(SLOT5_RELAY, OUTPUT);
   setRelay(SLOT5_RELAY, SLOT5_ACTIVE_LOW, false);
+  // GPIO 26 = DAC2 on ESP32. The DAC peripheral holds a voltage after boot
+  // that overrides digitalWrite and keeps the LED lit. Must disable DAC first.
+  dacDisable(RFID_R);
+  dacDisable(RFID_G);
   pinMode(RFID_R, OUTPUT);
   pinMode(RFID_G, OUTPUT);
+  // Explicitly drive both pins to OFF state immediately after pinMode
+  digitalWrite(RFID_R, LED_ACTIVE_LOW ? HIGH : LOW); // red OFF
+  digitalWrite(RFID_G, LED_ACTIVE_LOW ? HIGH : LOW); // green OFF
   pinMode(HEART_R, OUTPUT);
   pinMode(HEART_G, OUTPUT);
 
@@ -525,7 +532,26 @@ void setColor(int rPin, int gPin, int r, int g)
   }
 }
 
-void setRfidLed(int r, int g) { setColor(RFID_R, RFID_G, r, g); }
+// RFID LED uses digitalWrite only (no PWM).
+// On ESP32, analogWrite attaches a LEDC channel that persists and
+// prevents subsequent digitalWrite from working on the same pin.
+// Since the RFID LED only needs on/off states, we avoid analogWrite entirely.
+void setRfidLed(int r, int g)
+{
+  bool rOn = (r > 0);
+  bool gOn = (g > 0);
+
+  if (LED_ACTIVE_LOW)
+  {
+    digitalWrite(RFID_R, rOn ? LOW : HIGH);
+    digitalWrite(RFID_G, gOn ? LOW : HIGH);
+  }
+  else
+  {
+    digitalWrite(RFID_R, rOn ? HIGH : LOW);
+    digitalWrite(RFID_G, gOn ? HIGH : LOW);
+  }
+}
 void setHeartLed(int r, int g) { setColor(HEART_R, HEART_G, r, g); }
 
 void setRelay(int pin, bool activeLow, bool on)
