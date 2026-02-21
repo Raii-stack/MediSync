@@ -1,21 +1,16 @@
-version: "3.8"
-
 services:
   backend:
-    image: ry4nj/medisync-backend:v1.2
+    image: ry4nj/medisync-backend:latest
     container_name: medisync-backend-prod
     ports:
       - "3001:3001"
-    # 🔌 HARDWARE ACCESS - Map serial device
     devices:
       - "/dev/ttyS0:/dev/serial0"
-    # Run as root to ensure device access
     user: "0"
     privileged: true
     volumes:
       - backend-data:/app/data
       - /run/dbus:/run/dbus
-    # Load environment variables from .env file
     env_file:
       - .env
     environment:
@@ -28,7 +23,7 @@ services:
       - medisync-network
 
   frontend:
-    image: ry4nj/medisync-frontend:v1.3
+    image: ry4nj/medisync-frontend:latest
     container_name: medisync-frontend-prod
     restart: always
     depends_on:
@@ -37,8 +32,12 @@ services:
       - "80:5173"
     networks:
       - medisync-network
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
+      - VITE_API_URL=${VITE_API_URL}
+      - VITE_ADMIN_PASSWORD=${VITE_ADMIN_PASSWORD}
 
 networks:
   medisync-network:

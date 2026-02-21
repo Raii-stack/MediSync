@@ -57,5 +57,7 @@ jobs:
 
       - name: Pull and Restart Docker Containers
         run: |
+          cp /home/medisync/medisync-prod/.env ./.env
+        
           docker compose pull
           docker compose up -d
