@@ -30,12 +30,14 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
   useEffect(() => {
     // Connect to backend Socket.IO server
+    // Use the same URL as API (hostname:3001)
     console.log("🔌 Connecting to Socket.IO at:", SOCKET_URL);
     const socketInstance = io(SOCKET_URL, {
       transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: Infinity,
+      reconnectionDelayMax: 5000,
     });
 
     socketInstance.on("connect", () => {

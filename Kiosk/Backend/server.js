@@ -4,6 +4,7 @@ const { Server } = require("socket.io");
 const { io: ioClient } = require("socket.io-client");
 const cors = require("cors");
 const { execSync } = require("child_process");
+const { createClient } = require("@supabase/supabase-js");
 require("dotenv").config();
 const db = require("./database");
 const hardware = require("./serial");
@@ -11,6 +12,73 @@ const hardware = require("./serial");
 // Initialize App
 const app = express();
 const KIOSK_ID = process.env.KIOSK_ID || "kiosk-001";
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_ANON_KEY;
+const supabase =
+  supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+
+function pushKioskLogToCloud(payload, onSuccess) {
+  if (!supabase) return;
+
+  supabase
+    .from("kiosk_logs")
+    .insert([payload])
+    .then(({ error }) => {
+      if (error) {
+        console.error("[CLOUD] Failed to write kiosk log:", error.message);
+        return;
+      }
+
+      if (onSuccess) onSuccess();
+    });
+}
+
+function logUnregisteredRfid(uid, timestamp) {
+  const payload = {
+    kiosk_id: KIOSK_ID,
+    student_id: null,
+    unregistered_rfid_uid: uid,
+    symptoms_reported: [],
+    pain_scale: null,
+    temp_reading: null,
+    heart_rate_bpm: null,
+    medicine_dispensed: null,
+    created_at: timestamp,
+  };
+
+  db.run(
+    `
+      INSERT INTO kiosk_logs 
+      (student_id, unregistered_rfid_uid, symptoms, pain_scale, temp_reading, heart_rate, medicine_dispensed, slot_used, synced, created_at) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+    `,
+    [null, uid, "", null, null, null, null, null, timestamp],
+    function (err) {
+      if (err) {
+        console.error("Error logging unregistered RFID:", err.message);
+        pushKioskLogToCloud(payload);
+        return;
+      }
+
+      const localLogId = this.lastID;
+
+      pushKioskLogToCloud(payload, () => {
+        db.run(
+          "UPDATE kiosk_logs SET synced = 1 WHERE id = ?",
+          [localLogId],
+          (syncErr) => {
+            if (syncErr) {
+              console.error(
+                "Error marking unregistered RFID log as synced:",
+                syncErr.message,
+              );
+            }
+          },
+        );
+      });
+    },
+  );
+}
 
 // Connect to Clinic Socket (for emergency alerts)
 const CLINIC_SOCKET_URL = process.env.CLINIC_SOCKET_URL;
@@ -151,11 +219,32 @@ io.on("connection", (socket) => {
       activeSessionSockets.delete(sessionId);
     }
     console.log(`❌ Client disconnected: ${socket.id} - ${reason}`);
+
+    // Reset ESP32 and vitals session when client disconnects
+    console.log("🔄 Resetting ESP32 and vitals session...");
+    resetVitalsSession();
+
+    // Send reset command to ESP32
+    if (hardware.stopScan) {
+      hardware.stopScan();
+    }
+    if (hardware.sessionEnd) {
+      hardware.sessionEnd();
+    }
   });
 });
 
 // --- 1. HARDWARE STREAMING ---
 // When we get data (real or simulated), send it to the Frontend
+
+// Initialize RFID to idle (green) on startup
+setTimeout(() => {
+  console.log("[INIT] Setting RFID to idle (green)...");
+  if (hardware.sessionEnd) {
+    hardware.sessionEnd();
+  }
+}, 1000);
+
 console.log("[DEBUG] Setting up hardware.onData callback...");
 hardware.onData((event) => {
   if (!event) return;
@@ -163,6 +252,9 @@ hardware.onData((event) => {
   if (event.type === "login") {
     const uid = event.uid;
     if (!uid) return;
+
+    // Don't call sessionStart here - it will be called when vitals scan starts
+    // Just emit the RFID scan event to the frontend
 
     db.get(
       "SELECT * FROM students_cache WHERE rfid_uid = ?",
@@ -185,6 +277,8 @@ hardware.onData((event) => {
           console.log(`⚠️  Unknown RFID: ${uid} - Caching for sync`);
           const timestamp = new Date().toISOString();
           const tempStudentId = `UNCACHED_${uid}_${Date.now()}`;
+
+          logUnregisteredRfid(uid, timestamp);
 
           db.run(
             `INSERT INTO students_cache (student_id, rfid_uid, first_name, last_name, section, medical_flags) 
@@ -240,8 +334,8 @@ hardware.onData((event) => {
       // Hardware mode: ESP32 sends 0-1.0, convert to 0-100
       progress = Math.min(100, event.data.progress * 100);
     } else {
-      // Simulation fallback: calculate based on sample count
-      progress = Math.min(100, vitalsSession.sampleCount * 10);
+      // Simulation fallback: calculate based on sample count (5 samples total)
+      progress = Math.min(100, vitalsSession.sampleCount * 20);
     }
     io.emit("vitals-progress", {
       bpm: bpmValue,
@@ -254,7 +348,7 @@ hardware.onData((event) => {
     if (
       hardware.isSimulation &&
       hardware.isSimulation() &&
-      vitalsSession.sampleCount >= 17
+      vitalsSession.sampleCount >= 5
     ) {
       console.log(
         "[VITALS] [SIMULATION] Auto-completing scan after collecting sufficient samples",
@@ -287,6 +381,13 @@ hardware.onData((event) => {
     return;
   }
 
+  if (event.type === "status") {
+    if (event.status === "waiting_for_finger") {
+      io.emit("sensor-status", { status: "waiting_for_finger" });
+    }
+    return;
+  }
+
   if (event.type === "emergency") {
     console.log(`🚨 EMERGENCY BUTTON - Physical device triggered`);
     const timestamp = new Date().toISOString();
@@ -311,6 +412,38 @@ hardware.onData((event) => {
         "❌ Clinic socket not connected. Physical emergency alert not sent.",
       );
     }
+
+    return;
+  }
+
+  if (event.type === "rfid_test") {
+    const uid = event.uid;
+    if (!uid) return;
+
+    console.log(`[RFID TEST] 🧪 Test scan received: ${uid}`);
+
+    // Look up student in database and emit to frontend
+    db.get(
+      "SELECT * FROM students_cache WHERE rfid_uid = ?",
+      [uid],
+      (err, row) => {
+        if (err) {
+          console.error("[RFID TEST] Database error:", err.message);
+          io.emit("rfid-test-scan", { student: null, uid });
+          return;
+        }
+
+        if (row) {
+          console.log(
+            `[RFID TEST] ✅ Student found: ${row.first_name} ${row.last_name}`,
+          );
+          io.emit("rfid-test-scan", { student: row, uid });
+        } else {
+          console.log(`[RFID TEST] ⚠️  Unknown RFID: ${uid}`);
+          io.emit("rfid-test-scan", { student: null, uid });
+        }
+      },
+    );
 
     return;
   }
@@ -363,6 +496,255 @@ app.post("/api/login", (req, res) => {
           },
         });
       }
+    },
+  );
+});
+
+// GET: Fetch all students from cache
+app.get("/api/students", (req, res) => {
+  db.all(
+    "SELECT id, student_id, rfid_uid, first_name, last_name, age, grade_level, section, COALESCE(created_at, datetime('now')) as created_at FROM students_cache ORDER BY first_name",
+    (err, rows) => {
+      if (err) {
+        // If created_at column doesn't exist, try without it
+        if (err.message.includes("no such column: created_at")) {
+          console.log("⚠️  created_at column missing, running migration...");
+          db.run(
+            "ALTER TABLE students_cache ADD COLUMN created_at DATETIME",
+            (migErr) => {
+              if (migErr && !migErr.message.includes("duplicate column")) {
+                console.error("Migration failed:", migErr.message);
+                return res
+                  .status(500)
+                  .json({ success: false, error: migErr.message });
+              }
+              // Update existing records to set created_at
+              db.run(
+                "UPDATE students_cache SET created_at = datetime('now') WHERE created_at IS NULL",
+                (updateErr) => {
+                  if (updateErr) {
+                    console.log(
+                      "Info: Could not update created_at:",
+                      updateErr.message,
+                    );
+                  }
+                  // Retry the query after migration
+                  db.all(
+                    "SELECT id, student_id, rfid_uid, first_name, last_name, age, grade_level, section, COALESCE(created_at, datetime('now')) as created_at FROM students_cache ORDER BY first_name",
+                    (retryErr, retryRows) => {
+                      if (retryErr) {
+                        console.error(
+                          "Error fetching students after migration:",
+                          retryErr.message,
+                        );
+                        return res
+                          .status(500)
+                          .json({ success: false, error: retryErr.message });
+                      }
+                      res.json({ success: true, students: retryRows || [] });
+                    },
+                  );
+                },
+              );
+            },
+          );
+        } else {
+          console.error("Error fetching students:", err.message);
+          return res.status(500).json({ success: false, error: err.message });
+        }
+      } else {
+        res.json({ success: true, students: rows || [] });
+      }
+    },
+  );
+});
+
+// POST: Register a new student with RFID
+app.post("/api/students/register", (req, res) => {
+  const {
+    student_id,
+    rfid_uid,
+    first_name,
+    last_name,
+    age,
+    grade_level,
+    section,
+  } = req.body;
+
+  // Validate required fields
+  if (
+    !student_id ||
+    !rfid_uid ||
+    !first_name ||
+    !last_name ||
+    age === undefined ||
+    grade_level === undefined ||
+    !section
+  ) {
+    return res.status(400).json({
+      success: false,
+      error:
+        "Missing required fields: student_id, rfid_uid, first_name, last_name, age, grade_level, section",
+    });
+  }
+
+  // Check if student_id or rfid_uid already exists
+  db.get(
+    "SELECT id FROM students_cache WHERE student_id = ? OR rfid_uid = ?",
+    [student_id, rfid_uid],
+    (err, existingRow) => {
+      if (err) {
+        console.error("Registration check error:", err.message);
+        return res
+          .status(500)
+          .json({ success: false, error: "Database error" });
+      }
+
+      if (existingRow) {
+        return res.status(409).json({
+          success: false,
+          error: "Student ID or RFID already registered",
+        });
+      }
+
+      // Insert new student
+      db.run(
+        "INSERT INTO students_cache (student_id, rfid_uid, first_name, last_name, age, grade_level, section) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+          student_id,
+          rfid_uid,
+          first_name,
+          last_name,
+          age,
+          grade_level,
+          section,
+        ],
+        function (insertErr) {
+          if (insertErr) {
+            console.error("Error registering student:", insertErr.message);
+            return res
+              .status(500)
+              .json({ success: false, error: "Registration failed" });
+          }
+
+          // Fetch and return the newly created student
+          db.get(
+            "SELECT id, student_id, rfid_uid, first_name, last_name, age, grade_level, section, created_at FROM students_cache WHERE id = ?",
+            [this.lastID],
+            (fetchErr, student) => {
+              if (fetchErr) {
+                console.error(
+                  "Error fetching registered student:",
+                  fetchErr.message,
+                );
+                return res.status(500).json({
+                  success: false,
+                  error: "Failed to fetch registered student",
+                });
+              }
+
+              // Also add to kiosk_students table for sync tracking
+              db.run(
+                "INSERT INTO kiosk_students (student_id, kiosk_id, rfid_uid, first_name, last_name, age, grade_level, section) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                  student_id,
+                  KIOSK_ID,
+                  rfid_uid,
+                  first_name,
+                  last_name,
+                  age,
+                  grade_level,
+                  section,
+                ],
+                (kioskStudentErr) => {
+                  if (kioskStudentErr) {
+                    console.error(
+                      "Error tracking student in kiosk_students:",
+                      kioskStudentErr.message,
+                    );
+                    // Don't fail if kiosk_students insert fails - main registration succeeded
+                  }
+                },
+              );
+
+              console.log(
+                `✅ Student registered: ${first_name} ${last_name} (${student_id})`,
+              );
+              res.status(201).json({
+                success: true,
+                message: "Student registered successfully",
+                student: student,
+              });
+            },
+          );
+        },
+      );
+    },
+  );
+});
+
+// PUT: Update student data
+app.put("/api/students/:id", (req, res) => {
+  const { id } = req.params;
+  const { student_id, first_name, last_name, age, grade_level, section } =
+    req.body;
+
+  // Validate required fields
+  if (
+    !student_id ||
+    !first_name ||
+    !last_name ||
+    age === undefined ||
+    grade_level === undefined ||
+    !section
+  ) {
+    return res.status(400).json({
+      success: false,
+      error:
+        "Missing required fields: student_id, first_name, last_name, age, grade_level, section",
+    });
+  }
+
+  // Update student in database
+  db.run(
+    "UPDATE students_cache SET student_id = ?, first_name = ?, last_name = ?, age = ?, grade_level = ?, section = ? WHERE id = ?",
+    [student_id, first_name, last_name, age, grade_level, section, id],
+    function (err) {
+      if (err) {
+        console.error("Error updating student:", err.message);
+        return res.status(500).json({ success: false, error: "Update failed" });
+      }
+
+      if (this.changes === 0) {
+        return res.status(404).json({
+          success: false,
+          error: "Student not found",
+        });
+      }
+
+      // Fetch and return the updated student
+      db.get(
+        "SELECT id, student_id, rfid_uid, first_name, last_name, age, grade_level, section, created_at FROM students_cache WHERE id = ?",
+        [id],
+        (fetchErr, student) => {
+          if (fetchErr) {
+            console.error("Error fetching updated student:", fetchErr.message);
+            return res.status(500).json({
+              success: false,
+              error: "Failed to fetch updated student",
+            });
+          }
+
+          console.log(
+            `✅ Student updated: ${first_name} ${last_name} (${student_id})`,
+          );
+          res.json({
+            success: true,
+            message: "Student updated successfully",
+            student: student,
+          });
+        },
+      );
     },
   );
 });
@@ -574,12 +956,13 @@ app.post("/api/dispense", (req, res) => {
       const timestamp = new Date().toISOString();
       const stmt = db.prepare(`
         INSERT INTO kiosk_logs 
-        (student_id, symptoms, pain_scale, temp_reading, heart_rate, medicine_dispensed, slot_used, synced, created_at) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+        (student_id, unregistered_rfid_uid, symptoms, pain_scale, temp_reading, heart_rate, medicine_dispensed, slot_used, synced, created_at) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
       `);
 
       stmt.run(
         student_id || "ANON",
+        null,
         Array.isArray(symptoms) ? symptoms.join(",") : symptoms || "",
         pain_level || null,
         vitals?.temp || null,
@@ -587,6 +970,89 @@ app.post("/api/dispense", (req, res) => {
         medicine,
         servoId,
         timestamp,
+        function (logErr) {
+          if (logErr) {
+            console.error("Error logging dispense:", logErr.message);
+            return;
+          }
+
+          if (!supabase) return;
+
+          const localLogId = this.lastID;
+          const symptomsArray = Array.isArray(symptoms)
+            ? symptoms
+            : typeof symptoms === "string" && symptoms.trim().length > 0
+              ? symptoms.split(",").map((s) => s.trim())
+              : [];
+
+          const logPayloadBase = {
+            kiosk_id: KIOSK_ID,
+            symptoms_reported: symptomsArray,
+            pain_scale: pain_level || null,
+            temp_reading: vitals?.temp || null,
+            heart_rate_bpm: vitals?.bpm || null,
+            medicine_dispensed: medicine,
+            unregistered_rfid_uid: null,
+            created_at: timestamp,
+          };
+
+          const localStudentId =
+            student_id && student_id !== "ANON" ? student_id : null;
+
+          const markSynced = () => {
+            db.run(
+              "UPDATE kiosk_logs SET synced = 1 WHERE id = ?",
+              [localLogId],
+              (syncErr) => {
+                if (syncErr) {
+                  console.error(
+                    "Error marking dispense log as synced:",
+                    syncErr.message,
+                  );
+                }
+              },
+            );
+          };
+
+          if (localStudentId) {
+            db.get(
+              "SELECT student_uuid FROM students_cache WHERE student_id = ?",
+              [localStudentId],
+              (uuidErr, uuidRow) => {
+                if (uuidErr) {
+                  console.error(
+                    "[CLOUD] Failed to fetch student UUID:",
+                    uuidErr.message,
+                  );
+                  pushKioskLogToCloud(
+                    {
+                      ...logPayloadBase,
+                      student_id: null,
+                    },
+                    markSynced,
+                  );
+                  return;
+                }
+
+                pushKioskLogToCloud(
+                  {
+                    ...logPayloadBase,
+                    student_id: uuidRow?.student_uuid || null,
+                  },
+                  markSynced,
+                );
+              },
+            );
+          } else {
+            pushKioskLogToCloud(
+              {
+                ...logPayloadBase,
+                student_id: null,
+              },
+              markSynced,
+            );
+          }
+        },
       );
       stmt.finalize();
 
@@ -607,6 +1073,12 @@ app.get("/api/scan", (req, res) => {
 
   try {
     // Use nmcli to scan for networks on Raspberry Pi
+    try {
+      execSync("nmcli dev wifi rescan", { timeout: 10000, stdio: "pipe" });
+    } catch (rescanError) {
+      console.warn("⚠️  WiFi rescan failed:", rescanError.message);
+    }
+
     const output = execSync(
       'nmcli -t -f SSID,SIGNAL,SECURITY,ACTIVE dev wifi list 2>/dev/null || echo ""',
     )
@@ -631,35 +1103,6 @@ app.get("/api/scan", (req, res) => {
           };
         })
         .filter((net) => net.ssid); // Remove empty entries
-    } else {
-      // Fallback to mock data if nmcli fails
-      console.log("⚠️  nmcli not available, returning mock networks");
-      networks = [
-        {
-          ssid: "SchoolNet_5G",
-          signalStrength: 95,
-          security: "WPA2",
-          isConnected: false,
-        },
-        {
-          ssid: "SchoolNet_2.4G",
-          signalStrength: 88,
-          security: "WPA2",
-          isConnected: false,
-        },
-        {
-          ssid: "Clinic_Network",
-          signalStrength: 72,
-          security: "WPA3",
-          isConnected: false,
-        },
-        {
-          ssid: "Guest_WiFi",
-          signalStrength: 65,
-          security: "Open",
-          isConnected: false,
-        },
-      ];
     }
 
     res.json({
@@ -724,6 +1167,12 @@ app.post("/api/scan/start", (req, res) => {
   console.log("🟢 START_SCAN received");
   resetVitalsSession();
   vitalsSession.isScanning = true;
+
+  // Disable RFID when session starts
+  if (hardware.sessionStart) {
+    hardware.sessionStart();
+  }
+
   hardware.startScan();
   res.json({ success: true, message: "Scan started" });
 });
@@ -739,6 +1188,95 @@ app.post("/api/scan/stop", (req, res) => {
   }
 
   res.json({ success: true, message: "Scan stopped" });
+});
+
+// POST: End kiosk session (reset RFID LED)
+app.post("/api/session/end", (req, res) => {
+  console.log("🔵 SESSION_END received");
+  if (hardware.sessionEnd) {
+    hardware.sessionEnd();
+  }
+  res.json({ success: true, message: "Session ended" });
+});
+
+// POST: RFID Test - Allow admin to test RFID without affecting session state
+app.post("/api/rfid-test/simulate", (req, res) => {
+  const { rfid_uid } = req.body;
+
+  if (!rfid_uid) {
+    return res.status(400).json({
+      success: false,
+      message: "rfid_uid required",
+    });
+  }
+
+  console.log(`🧪 [TEST] Simulating RFID scan: ${rfid_uid}`);
+
+  db.get(
+    "SELECT * FROM students_cache WHERE rfid_uid = ?",
+    [rfid_uid],
+    (err, row) => {
+      if (err) {
+        console.error("RFID lookup error:", err.message);
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+        });
+      }
+
+      if (row) {
+        console.log(
+          `✅ [TEST] Student found: ${row.first_name} ${row.last_name} (${rfid_uid})`,
+        );
+        return res.json({
+          success: true,
+          student: row,
+          uid: rfid_uid,
+        });
+      } else {
+        console.log(`⚠️  [TEST] Unknown RFID: ${rfid_uid}`);
+        return res.json({
+          success: true,
+          student: null,
+          uid: rfid_uid,
+        });
+      }
+    },
+  );
+});
+
+// POST: Start RFID Hardware Test Mode
+app.post("/api/rfid-test/start", (req, res) => {
+  console.log("🧪 RFID_TEST_START received - Enabling hardware test mode");
+  if (hardware.startRfidTest) {
+    const result = hardware.startRfidTest();
+    return res.json({
+      success: true,
+      message: "RFID test mode enabled",
+      mode: result.mode,
+    });
+  }
+  res.status(500).json({
+    success: false,
+    message: "Hardware not available",
+  });
+});
+
+// POST: Stop RFID Hardware Test Mode
+app.post("/api/rfid-test/stop", (req, res) => {
+  console.log("🧪 RFID_TEST_STOP received - Disabling hardware test mode");
+  if (hardware.stopRfidTest) {
+    const result = hardware.stopRfidTest();
+    return res.json({
+      success: true,
+      message: "RFID test mode disabled",
+      mode: result.mode,
+    });
+  }
+  res.status(500).json({
+    success: false,
+    message: "Hardware not available",
+  });
 });
 
 // POST: Emergency Alert
@@ -776,128 +1314,6 @@ app.post("/api/emergency", (req, res) => {
       message: "Clinic connection unavailable. Please contact staff directly.",
     });
   }
-});
-
-// ========== DEBUG ENDPOINTS ==========
-// These endpoints are for testing Socket.IO without hardware
-
-// POST: Debug - Simulate RFID Tap
-app.post("/api/debug/rfid", (req, res) => {
-  // Explicitly set CORS headers
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
-
-  const { rfid_uid } = req.body;
-  const uid = rfid_uid || `TEST_RFID_${Date.now()}`;
-
-  console.log(`\n\n🔴 [DEBUG] Simulating RFID tap: ${uid}`);
-
-  // Trigger RFID lookup
-  db.get(
-    "SELECT * FROM students_cache WHERE rfid_uid = ?",
-    [uid],
-    (err, row) => {
-      if (err) {
-        console.error("RFID lookup error:", err.message);
-        io.emit("rfid-scan", { student: null, uid, debug: true });
-        return;
-      }
-      io.emit("rfid-scan", { student: row || null, uid, debug: true });
-      console.log(`✅ [DEBUG] RFID scan emitted for ${uid}`);
-    },
-  );
-
-  res.json({ success: true, message: `Simulating RFID: ${uid}` });
-});
-
-// POST: Debug - Trigger ESP32 RFID Simulation
-app.post("/api/debug/esp32-rfid", (req, res) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
-
-  const { uid } = req.body;
-
-  console.log(`\n\n🔴 [DEBUG] Sending fake RFID to ESP32 to trigger vitals...`);
-
-  const result = hardware.sendFakeRFIDToESP32(uid);
-
-  if (result.success) {
-    res.json({
-      success: true,
-      message: `Fake RFID sent to ESP32: ${result.uid}`,
-      uid: result.uid,
-      mode: result.mode,
-    });
-  } else {
-    res.status(500).json({
-      success: false,
-      message: "Failed to send fake RFID to ESP32",
-    });
-  }
-});
-
-// POST: Debug - Simulate Vitals Data
-app.post("/api/debug/vitals", (req, res) => {
-  // Explicitly set CORS headers
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
-
-  const { bpm, temp, duration } = req.body;
-  const simulatedBpm = bpm || 75;
-  const simulatedTemp = temp || 37.0;
-  const simulationDuration = duration || 5; // seconds
-
-  console.log(
-    `\n\n🔴 [DEBUG] Simulating vitals data for ${simulationDuration}s`,
-  );
-  console.log(`  BPM: ${simulatedBpm}, Temp: ${simulatedTemp}°C`);
-
-  let sampleCount = 0;
-  const totalSamples = simulationDuration * 2; // 2 samples per second
-  const interval = setInterval(() => {
-    sampleCount++;
-    // Progress 0-100 to match ESP32 flow
-    const progress = Math.min(
-      100,
-      Math.round((sampleCount / totalSamples) * 100),
-    );
-
-    // Add some variance
-    const varyBpm = simulatedBpm + (Math.random() - 0.5) * 10;
-    const varyTemp = parseFloat(simulatedTemp) + (Math.random() - 0.5) * 0.5;
-
-    console.log(
-      `[DEBUG] Sample ${sampleCount}/${totalSamples}: BPM=${varyBpm.toFixed(1)}, Temp=${varyTemp.toFixed(1)}, Progress=${progress}%`,
-    );
-
-    io.emit("vitals-progress", {
-      bpm: parseFloat(varyBpm.toFixed(1)),
-      temp: parseFloat(varyTemp.toFixed(1)),
-      progress: progress,
-      sample_count: sampleCount,
-      debug: true,
-    });
-
-    // Complete after duration
-    if (sampleCount >= totalSamples) {
-      clearInterval(interval);
-      io.emit("vitals-complete", {
-        avg_bpm: simulatedBpm,
-        temp: parseFloat(simulatedTemp.toFixed(1)),
-        debug: true,
-      });
-      console.log(`✅ [DEBUG] Vitals simulation complete`);
-    }
-  }, 500);
-
-  res.json({
-    success: true,
-    message: `Simulating vitals for ${simulationDuration}s`,
-    params: { bpm: simulatedBpm, temp: simulatedTemp },
-  });
 });
 
 // POST: ESP32 - Blink Heart Rate LED
@@ -942,10 +1358,10 @@ app.post("/api/test-dispense", (req, res) => {
 
   const { slot_id } = req.body;
 
-  if (!slot_id || slot_id < 1 || slot_id > 4) {
+  if (!slot_id || slot_id < 1 || slot_id > 5) {
     return res.status(400).json({
       success: false,
-      message: "Invalid slot_id (must be 1-4)",
+      message: "Invalid slot_id (must be 1-5)",
     });
   }
 

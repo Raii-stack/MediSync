@@ -26,6 +26,7 @@ const tables = [
   "medicines_library",
   "kiosk_slots",
   "kiosk_logs",
+  "kiosk_students",
 ];
 let completedTables = 0;
 
@@ -34,13 +35,16 @@ db.run(
   `
   CREATE TABLE IF NOT EXISTS students_cache (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id TEXT,
+    student_id TEXT UNIQUE,
     student_uuid TEXT,
     rfid_uid TEXT UNIQUE,
     first_name TEXT,
     last_name TEXT,
+    age INTEGER,
+    grade_level INTEGER,
     section TEXT,
-    medical_flags TEXT
+    medical_flags TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )
 `,
   (err) => {
@@ -107,6 +111,7 @@ db.run(
   CREATE TABLE IF NOT EXISTS kiosk_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     student_id TEXT,
+    unregistered_rfid_uid TEXT,
     symptoms TEXT,
     pain_scale INTEGER,
     temp_reading DECIMAL,
@@ -123,6 +128,36 @@ db.run(
       process.exit(1);
     }
     console.log("✓ kiosk_logs table created or already exists");
+    completedTables++;
+    checkCompletion();
+  },
+);
+
+// 5. Create kiosk_students table (tracks locally registered students)
+db.run(
+  `
+  CREATE TABLE IF NOT EXISTS kiosk_students (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id TEXT NOT NULL,
+    kiosk_id TEXT NOT NULL,
+    rfid_uid TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    age INTEGER,
+    grade_level INTEGER,
+    section TEXT,
+    kiosk_registered BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    synced BOOLEAN DEFAULT 0,
+    UNIQUE(student_id, kiosk_id)
+  )
+`,
+  (err) => {
+    if (err) {
+      console.error("Error creating kiosk_students table:", err.message);
+      process.exit(1);
+    }
+    console.log("✓ kiosk_students table created or already exists");
     completedTables++;
     checkCompletion();
   },
@@ -252,6 +287,7 @@ function seedKioskSlots() {
         { slot_id: 2, medicine_name: "Neozep", current_stock: 50 },
         { slot_id: 3, medicine_name: "Buscopan", current_stock: 30 },
         { slot_id: 4, medicine_name: "Cetirizine", current_stock: 30 },
+        { slot_id: 5, medicine_name: "Bioflu", current_stock: 30 },
       ];
 
       const stmt = db.prepare(
