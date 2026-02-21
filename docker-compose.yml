@@ -19,6 +19,8 @@ services:
       - ESP32_SERIAL_PORT=/dev/serial0
       - ESP32_BAUD_RATE=115200
       - ESP32_ENABLED=true
+      - SYNC_INTERVAL=${SYNC_INTERVAL:-60}
+      - ROOM_ASSIGNED=${ROOM_ASSIGNED:-Room TBD}
     restart: always
 
   frontend:

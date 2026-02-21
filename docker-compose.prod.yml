@@ -24,6 +24,8 @@ services:
       - ESP32_ENABLED=true
       - CLINIC_SOCKET_URL=${CLINIC_SOCKET_URL:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - SYNC_INTERVAL=${SYNC_INTERVAL:-60}
+      - ROOM_ASSIGNED=${ROOM_ASSIGNED:-Room TBD}
     restart: always
 
   frontend:

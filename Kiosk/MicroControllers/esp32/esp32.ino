@@ -105,8 +105,15 @@ void setup()
 
   pinMode(SLOT5_RELAY, OUTPUT);
   setRelay(SLOT5_RELAY, SLOT5_ACTIVE_LOW, false);
+  // GPIO 26 = DAC2 on ESP32. The DAC peripheral holds a voltage after boot
+  // that overrides digitalWrite and keeps the LED lit. Must disable DAC first.
+  dacDisable(RFID_R);
+  dacDisable(RFID_G);
   pinMode(RFID_R, OUTPUT);
   pinMode(RFID_G, OUTPUT);
+  // Explicitly drive both pins to OFF state immediately after pinMode
+  digitalWrite(RFID_R, LED_ACTIVE_LOW ? HIGH : LOW); // red OFF
+  digitalWrite(RFID_G, LED_ACTIVE_LOW ? HIGH : LOW); // green OFF
   pinMode(HEART_R, OUTPUT);
   pinMode(HEART_G, OUTPUT);
 
