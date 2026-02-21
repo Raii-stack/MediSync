@@ -6,10 +6,12 @@ import { RecommendationScreen } from "./pages/RecommendationScreen";
 import { ReceiptScreen } from "./pages/ReceiptScreen";
 import { ProtectedAdminRoute } from "./components/ProtectedAdminRoute";
 
-// On page refresh, sessionStorage is cleared, so flow pages redirect to home.
-// The WelcomeScreen sets this flag when a session begins.
-function requireSession() {
-  if (!sessionStorage.getItem("kiosk_session_active")) {
+// Module-level flag: resets to false on every page refresh (JS bundle reload).
+// Set to true only when the user lands on the home page via normal navigation.
+let navigatedFromHome = false;
+
+function requireHomeFirst() {
+  if (!navigatedFromHome) {
     return redirect("/");
   }
   return null;
@@ -20,30 +22,29 @@ export const router = createBrowserRouter([
     path: "/",
     Component: WelcomeScreen,
     loader: () => {
-      // Mark session as active when user lands on the welcome page
-      sessionStorage.setItem("kiosk_session_active", "true");
+      navigatedFromHome = true;
       return null;
     },
   },
   {
     path: "/vitals",
     Component: VitalSignsScreen,
-    loader: requireSession,
+    loader: requireHomeFirst,
   },
   {
     path: "/symptoms",
     Component: SymptomsScreen,
-    loader: requireSession,
+    loader: requireHomeFirst,
   },
   {
     path: "/recommendation",
     Component: RecommendationScreen,
-    loader: requireSession,
+    loader: requireHomeFirst,
   },
   {
     path: "/receipt",
     Component: ReceiptScreen,
-    loader: requireSession,
+    loader: requireHomeFirst,
   },
   {
     path: "/admin",
