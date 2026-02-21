@@ -1,0 +1,59 @@
+name: MediSync ESP32 Flash
+
+on:
+  workflow_dispatch: 
+
+jobs:
+  build-esp32:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Compile ESP32 Sketch
+        uses: arduino/compile-action@v1
+        with:
+          fqbn: esp32:esp32:esp32
+          sketch-path: ./Kiosk/MicroControllers/esp32
+          libraries: |
+            - name: Adafruit BusIO
+              version: 1.17.4
+            - name: Adafruit MLX90614 Library
+              version: 2.1.3
+            - name: ArduinoJson
+              version: 6.21.3
+            - name: SparkFun MAX3010x Pulse and Proximity Sensor Library
+              version: x.x.x # Replace with your installed version
+            - name: MFRC522
+              version: x.x.x # Replace with your installed version
+
+      - name: Upload ESP32 Binary
+        uses: actions/upload-artifact@v3
+        with:
+          name: esp32-firmware
+          path: ./Kiosk/MicroControllers/esp32/build/esp32.esp32.esp32/*.bin
+
+  flash-esp32:
+    needs: build-esp32
+    runs-on: [self-hosted, rpi-3b] 
+    
+    steps:
+      - name: Download ESP32 Firmware
+        uses: actions/download-artifact@v3
+        with:
+          name: esp32-firmware
+          path: ./firmware
+
+      - name: Flash ESP32 via UART
+        run: |
+          # 1. Trigger the auto-reset script to put ESP32 in Flash Mode
+          python3 ~/autoflash.py
+          
+          # 2. Activate virtual environment
+          source ~/esp_venv/bin/activate
+          
+          # 3. Flash the binary
+          esptool.py --port /dev/serial0 --baud 115200 write_flash 0x10000 ./firmware/*.bin
+          
+          # 4. Reboot the ESP32 to run the new code
+          python3 ~/autoreset.py
