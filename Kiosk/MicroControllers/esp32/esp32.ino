@@ -510,17 +510,18 @@ void setColor(int rPin, int gPin, int r, int g)
   r = constrain(r, 0, 255);
   g = constrain(g, 0, 255);
 
+  // Use digitalWrite for zero values to guarantee the pin is fully off.
+  // analogWrite(pin, 0) on the ESP32 can leave a residual signal that
+  // causes both LEDs to glow simultaneously.
   if (LED_ACTIVE_LOW)
   {
-    // Active low: write inverted values
-    analogWrite(rPin, 255 - r);
-    analogWrite(gPin, 255 - g);
+    if (r == 0) digitalWrite(rPin, HIGH); else analogWrite(rPin, 255 - r);
+    if (g == 0) digitalWrite(gPin, HIGH); else analogWrite(gPin, 255 - g);
   }
   else
   {
-    // Active high: write directly
-    analogWrite(rPin, r);
-    analogWrite(gPin, g);
+    if (r == 0) digitalWrite(rPin, LOW); else analogWrite(rPin, r);
+    if (g == 0) digitalWrite(gPin, LOW); else analogWrite(gPin, g);
   }
 }
 

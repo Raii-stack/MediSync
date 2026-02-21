@@ -3,6 +3,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Install nmcli for WiFi management on Raspberry Pi
+RUN apk add --no-cache networkmanager
+
 COPY package*.json ./
 
 RUN npm install

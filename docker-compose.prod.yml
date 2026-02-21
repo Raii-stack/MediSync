@@ -6,8 +6,9 @@ services:
       args:
         - NODE_ENV=production
     container_name: medisync-backend-prod
-    ports:
-      - "3001:3001"
+    network_mode: host
+    privileged: true
+
     volumes:
       - backend-data:/app/data
       - /run/dbus:/run/dbus  # Required for WiFi management via NetworkManager
@@ -17,8 +18,6 @@ services:
       - CLINIC_SOCKET_URL=${CLINIC_SOCKET_URL:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     restart: always
-    networks:
-      - medisync-network
 
   frontend:
     build:
