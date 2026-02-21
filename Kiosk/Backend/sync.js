@@ -327,8 +327,7 @@ async function pullSlotConfigurations() {
 
 // ============================================================================
 // STEP C: Push Locally Registered Students to Cloud (Local → Cloud)
-// Only syncs students who have been registered on THIS kiosk
-// Does NOT pull entire student database
+// Pushes students registered on THIS kiosk to the cloud students table
 // ============================================================================
 async function pushLocalStudents() {
   return new Promise((resolve, reject) => {
@@ -358,7 +357,7 @@ async function pushLocalStudents() {
           );
 
           try {
-            // Transform local students for cloud
+            // Transform local students for cloud 'students' table
             const studentsToSync = rows.map((student) => ({
               student_id: student.student_id,
               rfid_uid: student.rfid_uid,
@@ -367,15 +366,13 @@ async function pushLocalStudents() {
               age: student.age || null,
               grade_level: student.grade_level || null,
               section: student.section || "",
-              kiosk_registered: student.kiosk_registered,
-              kiosk_id: student.kiosk_id,
               created_at: student.created_at,
             }));
 
-            // Insert or update in cloud (kiosk_students table for tracking local registrations)
+            // Upsert into cloud 'students' table (not kiosk_students)
             const { error } = await supabase
-              .from("kiosk_students")
-              .upsert(studentsToSync, { onConflict: "student_id, kiosk_id" });
+              .from("students")
+              .upsert(studentsToSync, { onConflict: "student_id,rfid_uid" });
 
             if (error) {
               console.error("[SYNC-C] Supabase error:", error.message);
@@ -399,7 +396,7 @@ async function pushLocalStudents() {
                 );
                 rows.forEach((student) => {
                   console.log(
-                    `[SYNC-C] ✅ Synced local student: ${student.first_name} ${student.last_name}`,
+                    `[SYNC-C] ✅ Synced local student: ${student.first_name} ${student.last_name} (RFID: ${student.rfid_uid})`,
                   );
                 });
               }
@@ -422,6 +419,8 @@ async function pushLocalStudents() {
 
 // ============================================================================
 // STEP D: Push Unsynced Kiosk Logs to Cloud (Local → Cloud)
+// Handles both registered students (via UUID) and unregistered RFIDs
+// For unregistered RFIDs, looks them up in cloud students table to get proper ID
 // =====================================================================
 async function pushKioskLogs() {
   return new Promise((resolve, reject) => {
@@ -438,24 +437,105 @@ async function pushKioskLogs() {
     `,
       async (err, rows) => {
         if (err) {
-          console.error("[SYNC-B] Database error:", err.message);
+          console.error("[SYNC-D] Database error:", err.message);
           return resolve();
         }
 
         if (rows.length === 0) {
-          console.log("[SYNC-B] ✓ No kiosk logs to sync.");
+          console.log("[SYNC-D] ✓ No kiosk logs to sync.");
           return resolve();
         }
 
         console.log(
-          `[SYNC-B] 📤 Found ${rows.length} unsynced log(s). Pushing to cloud...`,
+          `[SYNC-D] 📤 Found ${rows.length} unsynced log(s). Processing...`,
         );
 
         try {
+          // Separate logs into registered and unregistered
+          const registeredLogs = rows.filter((row) => row.student_uuid);
+          const unregisteredLogs = rows.filter(
+            (row) => !row.student_uuid && row.unregistered_rfid_uid,
+          );
+
+          console.log(
+            `[SYNC-D] 📋 ${registeredLogs.length} registered, ${unregisteredLogs.length} unregistered.`,
+          );
+
+          // Process unregistered logs: look up RFID in cloud to get student ID
+          const processedLogs = [...registeredLogs];
+
+          if (unregisteredLogs.length > 0) {
+            console.log(
+              `[SYNC-D] 🔍 Looking up ${unregisteredLogs.length} unregistered RFID(s) in cloud...`,
+            );
+
+            for (const log of unregisteredLogs) {
+              try {
+                // Query cloud students table by rfid_uid
+                const { data: studentData, error: lookupError } = await supabase
+                  .from("students")
+                  .select("id, rfid_uid, first_name, last_name")
+                  .eq("rfid_uid", log.unregistered_rfid_uid)
+                  .single();
+
+                if (lookupError && lookupError.code !== "PGRST116") {
+                  console.error(
+                    `[SYNC-D] Error looking up RFID ${log.unregistered_rfid_uid}:`,
+                    lookupError.message,
+                  );
+                  // Keep the log as unregistered if lookup fails
+                  processedLogs.push(log);
+                } else if (studentData) {
+                  // Found the student in cloud! Update local log with student_id
+                  console.log(
+                    `[SYNC-D] ✅ Found student: ${studentData.first_name} ${studentData.last_name} (ID: ${studentData.id})`,
+                  );
+
+                  // Update local kiosk_logs with the cloud student ID
+                  await new Promise((resolveUpdate) => {
+                    db.run(
+                      "UPDATE kiosk_logs SET student_id = ? WHERE id = ? AND unregistered_rfid_uid = ?",
+                      [studentData.id, log.id, log.unregistered_rfid_uid],
+                      (updateErr) => {
+                        if (updateErr) {
+                          console.error(
+                            `[SYNC-D] Failed to update log ID ${log.id}:`,
+                            updateErr.message,
+                          );
+                        } else {
+                          console.log(
+                            `[SYNC-D] ✓ Updated local log with student ID`,
+                          );
+                        }
+                        resolveUpdate();
+                      },
+                    );
+                  });
+
+                  // Add updated log to sync list
+                  log.student_uuid = studentData.id;
+                  processedLogs.push(log);
+                } else {
+                  // Student not found in cloud, keep as unregistered
+                  console.log(
+                    `[SYNC-D] ⚠️  RFID ${log.unregistered_rfid_uid} not found in cloud students table`,
+                  );
+                  processedLogs.push(log);
+                }
+              } catch (err) {
+                console.error(
+                  `[SYNC-D] Error processing RFID ${log.unregistered_rfid_uid}:`,
+                  err.message,
+                );
+                processedLogs.push(log);
+              }
+            }
+          }
+
           // Transform local kiosk_logs for Supabase
-          const logsToSync = rows.map((row) => ({
+          const logsToSync = processedLogs.map((row) => ({
             kiosk_id: KIOSK_ID,
-            student_id: row.student_uuid, // Use UUID from students_cache
+            student_id: row.student_uuid || null, // Use UUID from students_cache or looked-up student
             symptoms_reported: row.symptoms
               ? row.symptoms.split(",").map((s) => s.trim())
               : [],
@@ -467,29 +547,33 @@ async function pushKioskLogs() {
             created_at: row.created_at,
           }));
 
+          console.log(
+            `[SYNC-D] 📤 Pushing ${logsToSync.length} log(s) to cloud...`,
+          );
+
           // Insert into Supabase
           const { error } = await supabase
             .from("kiosk_logs")
             .insert(logsToSync);
 
           if (error) {
-            console.error("[SYNC-B] Supabase error:", error.message);
+            console.error("[SYNC-D] Supabase error:", error.message);
             return resolve();
           }
 
           // Mark all as synced in local database
           db.run("UPDATE kiosk_logs SET synced = 1 WHERE synced = 0", (err) => {
             if (err) {
-              console.error("[SYNC-B] Failed to mark as synced:", err.message);
+              console.error("[SYNC-D] Failed to mark as synced:", err.message);
             } else {
               console.log(
-                `[SYNC-B] ✅ Marked ${rows.length} log(s) as synced.`,
+                `[SYNC-D] ✅ Marked ${rows.length} log(s) as synced.`,
               );
             }
             resolve();
           });
         } catch (err) {
-          console.error("[SYNC-B] Error:", err.message);
+          console.error("[SYNC-D] Error:", err.message);
           resolve();
         }
       },

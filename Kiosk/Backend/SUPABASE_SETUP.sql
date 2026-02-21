@@ -99,7 +99,8 @@ create table public.kiosk_logs (
   temp_reading decimal(4,1), -- Fixed: Changed to decimal
   heart_rate_bpm int,
   medicine_dispensed text,
-  created_at timestamp with time zone default now()
+  created_at timestamp with time zone default now(),
+  unregistered_rfid_uid text
 );
 
 -- The official medical record (Manual + Automated).

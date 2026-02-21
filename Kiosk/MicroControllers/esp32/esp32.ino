@@ -33,13 +33,13 @@ unsigned long lastRfidRead = 0;
 #define SLOT1_RELAY 33
 #define SLOT2_RELAY 32
 #define SLOT3_RELAY 25
-#define SLOT4_RELAY 26
-#define SLOT5_RELAY 27
+#define SLOT4_RELAY 12
+#define SLOT5_RELAY 14
 #define BUZZER_PIN 15
 
 // RFID Status LED
-#define RFID_R 12
-#define RFID_G 14
+#define RFID_R 26
+#define RFID_G 27
 
 // Heartbeat Progress LED
 #define HEART_R 2
@@ -75,6 +75,7 @@ enum ScanState
 };
 ScanState currentState = IDLE;
 
+bool rfidDisabled = false; // Flag to disable RFID when session is active
 bool lastEmergencyState = HIGH;
 unsigned long lastEmergencyDebounce = 0;
 unsigned long lastDispenseTime = 0;
@@ -100,15 +101,9 @@ void setup()
   digitalWrite(SLOT3_RELAY, HIGH);
   pinMode(SLOT4_RELAY, OUTPUT);
   digitalWrite(SLOT4_RELAY, HIGH);
-  // Configure PWM for SLOT4_RELAY with lower frequency for stronger drive current
-  ledcAttach(SLOT4_RELAY, 1000, 8); // 1kHz frequency = more current
-  ledcWrite(SLOT4_RELAY, 255);      // Start HIGH
 
   pinMode(SLOT5_RELAY, OUTPUT);
   digitalWrite(SLOT5_RELAY, HIGH);
-  // Configure PWM for SLOT5_RELAY with lower frequency for stronger drive current
-  ledcAttach(SLOT5_RELAY, 1000, 8); // 1kHz frequency = more current
-  ledcWrite(SLOT5_RELAY, 255);      // Start HIGH
   pinMode(RFID_G, OUTPUT);
   pinMode(HEART_R, OUTPUT);
   pinMode(HEART_G, OUTPUT);
@@ -180,6 +175,10 @@ void loop()
 #if ENABLE_RFID
 void checkRFID()
 {
+  // Disable RFID scanning when session is active (unless in test mode)
+  if (rfidDisabled && currentState != TESTING_RFID)
+    return;
+
   if (millis() - lastRfidRead < 1000)
     return;
 
@@ -243,6 +242,7 @@ void processJSONCommand(String json)
 
   if (cmd == "session_start" || cmd == "start_vitals")
   {
+    rfidDisabled = true; // Disable RFID when session starts
     setRfidLed(255, 0);
     if (cmd == "start_vitals")
     {
@@ -252,6 +252,7 @@ void processJSONCommand(String json)
   }
   else if (cmd == "session_end" || cmd == "reset")
   {
+    rfidDisabled = false; // Re-enable RFID when session ends
     setRfidLed(0, 255);
     setHeartLed(0, 255); // Back to idle (green)
     currentState = IDLE;
@@ -456,18 +457,17 @@ void dispense(int slot)
   {
     playDispensingTone();
 
-    // Use PWM for slots 4 and 5 to provide stronger drive current
     if (slot == 4)
     {
-      ledcWrite(SLOT4_RELAY, 0);   // LOW via PWM
-      delay(2500);                 // Extended hold time for slot 4
-      ledcWrite(SLOT4_RELAY, 255); // HIGH via PWM
+      digitalWrite(SLOT4_RELAY, LOW);
+      delay(2500);
+      digitalWrite(SLOT4_RELAY, HIGH);
     }
     else if (slot == 5)
     {
-      ledcWrite(SLOT5_RELAY, 0);   // LOW via PWM
-      delay(2500);                 // Extended hold time for slot 5
-      ledcWrite(SLOT5_RELAY, 255); // HIGH via PWM
+      digitalWrite(SLOT5_RELAY, LOW);
+      delay(2500);
+      digitalWrite(SLOT5_RELAY, HIGH);
     }
     else
     {
