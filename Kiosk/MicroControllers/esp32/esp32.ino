@@ -1,7 +1,3 @@
-/*
- * MediSync Kiosk - ESP32 Firmware (Dual LEDs + RFID + UART on 1/3)
- */
-
 #include <Wire.h>
 #include <Adafruit_MLX90614.h>
 #include <MAX30105.h>
@@ -14,8 +10,6 @@
 #define ENABLE_RFID true
 #define LED_ACTIVE_LOW false
 
-// ==================== PIN MAP ====================
-// I2C Buses
 // ==================== PIN MAP ====================
 // I2C Buses
 #define THERMAL_SDA 21
@@ -37,6 +31,13 @@ unsigned long lastRfidRead = 0;
 #define SLOT5_RELAY 14
 #define BUZZER_PIN 15
 
+// Relay logic (true = active-low, false = active-high)
+#define SLOT1_ACTIVE_LOW true
+#define SLOT2_ACTIVE_LOW true
+#define SLOT3_ACTIVE_LOW true
+#define SLOT4_ACTIVE_LOW true
+#define SLOT5_ACTIVE_LOW true
+
 // RFID Status LED
 #define RFID_R 26
 #define RFID_G 27
@@ -52,7 +53,6 @@ unsigned long lastRfidRead = 0;
 #define UART_RX 3
 #define UART_TX 1
 
-// ==================== GLOBAL OBJECTS ====================
 // ==================== GLOBAL OBJECTS ====================
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 MAX30105 particleSensor;
@@ -83,8 +83,9 @@ unsigned long lastDispenseTime = 0;
 // ==================== SETUP ====================
 void setup()
 {
-  // We initialize Serial2 on pins 3 (RX) and 1 (TX).
-  // Note: This overrides the default USB Serial debug output on these pins.
+  // Boot guard: allow strapping pins to settle before driving relays.
+  delay(2000);
+
   Serial2.begin(115200, SERIAL_8N1, UART_RX, UART_TX);
 
   // Adding a small delay to let Serial2 settle
@@ -94,16 +95,17 @@ void setup()
 
   // Relays
   pinMode(SLOT1_RELAY, OUTPUT);
-  digitalWrite(SLOT1_RELAY, HIGH);
+  setRelay(SLOT1_RELAY, SLOT1_ACTIVE_LOW, false);
   pinMode(SLOT2_RELAY, OUTPUT);
-  digitalWrite(SLOT2_RELAY, HIGH);
+  setRelay(SLOT2_RELAY, SLOT2_ACTIVE_LOW, false);
   pinMode(SLOT3_RELAY, OUTPUT);
-  digitalWrite(SLOT3_RELAY, HIGH);
+  setRelay(SLOT3_RELAY, SLOT3_ACTIVE_LOW, false);
   pinMode(SLOT4_RELAY, OUTPUT);
-  digitalWrite(SLOT4_RELAY, HIGH);
+  setRelay(SLOT4_RELAY, SLOT4_ACTIVE_LOW, false);
 
   pinMode(SLOT5_RELAY, OUTPUT);
-  digitalWrite(SLOT5_RELAY, HIGH);
+  setRelay(SLOT5_RELAY, SLOT5_ACTIVE_LOW, false);
+  pinMode(RFID_R, OUTPUT);
   pinMode(RFID_G, OUTPUT);
   pinMode(HEART_R, OUTPUT);
   pinMode(HEART_G, OUTPUT);
@@ -442,16 +444,32 @@ void dispense(int slot)
   lastDispenseTime = millis();
 
   int pin = -1;
+  bool activeLow = true;
   if (slot == 1)
+  {
     pin = SLOT1_RELAY;
+    activeLow = SLOT1_ACTIVE_LOW;
+  }
   else if (slot == 2)
+  {
     pin = SLOT2_RELAY;
+    activeLow = SLOT2_ACTIVE_LOW;
+  }
   else if (slot == 3)
+  {
     pin = SLOT3_RELAY;
+    activeLow = SLOT3_ACTIVE_LOW;
+  }
   else if (slot == 4)
+  {
     pin = SLOT4_RELAY;
+    activeLow = SLOT4_ACTIVE_LOW;
+  }
   else if (slot == 5)
+  {
     pin = SLOT5_RELAY;
+    activeLow = SLOT5_ACTIVE_LOW;
+  }
 
   if (pin != -1)
   {
@@ -459,21 +477,21 @@ void dispense(int slot)
 
     if (slot == 4)
     {
-      digitalWrite(SLOT4_RELAY, LOW);
+      setRelay(SLOT4_RELAY, activeLow, true);
       delay(2500);
-      digitalWrite(SLOT4_RELAY, HIGH);
+      setRelay(SLOT4_RELAY, activeLow, false);
     }
     else if (slot == 5)
     {
-      digitalWrite(SLOT5_RELAY, LOW);
+      setRelay(SLOT5_RELAY, activeLow, true);
       delay(2500);
-      digitalWrite(SLOT5_RELAY, HIGH);
+      setRelay(SLOT5_RELAY, activeLow, false);
     }
     else
     {
-      digitalWrite(pin, LOW);
+      setRelay(pin, activeLow, true);
       delay(2000);
-      digitalWrite(pin, HIGH);
+      setRelay(pin, activeLow, false);
     }
 
     StaticJsonDocument<200> doc;
@@ -508,6 +526,18 @@ void setColor(int rPin, int gPin, int r, int g)
 
 void setRfidLed(int r, int g) { setColor(RFID_R, RFID_G, r, g); }
 void setHeartLed(int r, int g) { setColor(HEART_R, HEART_G, r, g); }
+
+void setRelay(int pin, bool activeLow, bool on)
+{
+  if (activeLow)
+  {
+    digitalWrite(pin, on ? LOW : HIGH);
+  }
+  else
+  {
+    digitalWrite(pin, on ? HIGH : LOW);
+  }
+}
 
 void sendJson(String event, String status, int val1, int val2)
 {
