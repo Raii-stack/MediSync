@@ -17,6 +17,12 @@ export function WelcomeScreen() {
 
     // Listen for RFID scan events from the backend
     const handleRfidScan = (data: { student: any; uid: string }) => {
+      // Ignore if the emergency modal is currently capturing the scanner
+      if (sessionStorage.getItem("emergencyModalOpen") === "true") {
+        console.log("📡 Welcome Screen ignored RFID scan (Emergency Modal active)");
+        return;
+      }
+
       console.log("📡 RFID Scan received:", data);
 
       // Store student data in sessionStorage for use in other screens

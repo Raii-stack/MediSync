@@ -372,7 +372,7 @@ async function pushLocalStudents() {
             // Upsert into cloud 'students' table (not kiosk_students)
             const { error } = await supabase
               .from("students")
-              .upsert(studentsToSync, { onConflict: "student_id,rfid_uid" });
+              .upsert(studentsToSync, { onConflict: "student_id" });
 
             if (error) {
               console.error("[SYNC-C] Supabase error:", error.message);

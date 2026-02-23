@@ -22,6 +22,8 @@ export function EmergencyModal({ isOpen, onClose, onConfirm }: EmergencyModalPro
   const { socket } = useSocket();
 
   useEffect(() => {
+    sessionStorage.setItem("emergencyModalOpen", isOpen ? "true" : "false");
+    
     if (!isOpen) {
       // Reset state when modal closes
       setStep('scan');
@@ -108,12 +110,6 @@ export function EmergencyModal({ isOpen, onClose, onConfirm }: EmergencyModalPro
     }
   };
 
-  const handleSkipId = () => {
-    setEmergencyRfidUid(null);
-    setStep('select');
-    axios.post(`${API_BASE_URL}/api/esp32/disable-rfid`).catch(console.error);
-  };
-
   const handleSelectType = (type: EmergencyType) => {
     setSelectedType(type);
     setStep('countdown');
@@ -196,14 +192,6 @@ export function EmergencyModal({ isOpen, onClose, onConfirm }: EmergencyModalPro
                <div className="bg-red-50 text-red-700 py-3 px-4 rounded-xl font-medium text-sm mb-4 border border-red-100">
                  Scanner Active. Waiting for card...
                </div>
-               
-               <button
-                onClick={handleSkipId}
-                className="w-full bg-orange-500 hover:bg-orange-600 text-white py-4 rounded-xl font-bold text-lg transition-all hover:scale-[1.02] active:scale-95 shadow-lg flex items-center justify-center gap-2"
-              >
-                <UserX className="w-5 h-5" />
-                Skip / No ID
-              </button>
 
                <button
                 onClick={handleClose}
