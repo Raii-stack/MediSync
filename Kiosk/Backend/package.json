@@ -25,7 +25,7 @@
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "sqlite3": "^5.0.2",
-    "pi-blaster.js": "^0.3.1"
+    "pi-blaster.js": "latest"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
