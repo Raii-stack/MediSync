@@ -158,6 +158,7 @@ export function RecommendationScreen() {
         const response = await axios.post(`${API_BASE_URL}/api/dispense`, {
           medicine: recommendation.medicine.name,
           student_id: studentId,
+          rfid_uid: student?.rfid_uid || null,
           student_name: studentName,
           symptoms: selectedSymptoms.join(","),
           pain_level: painLevel,

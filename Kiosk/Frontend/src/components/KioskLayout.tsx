@@ -30,6 +30,7 @@ export function KioskLayout({
       <EmergencyModal
         isOpen={isEmergencyModalOpen}
         onClose={() => setIsEmergencyModalOpen(false)}
+        onConfirm={() => setIsEmergencyModalOpen(false)}
       />
 
       {/* Greeting */}

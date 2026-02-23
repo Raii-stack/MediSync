@@ -11,9 +11,14 @@ services:
     user: "0"
     devices:
       - "/dev/ttyS0:/dev/serial0"
+      - "/dev/gpiomem:/dev/gpiomem"
+    cap_add:
+      - NET_ADMIN
+      - SYS_RAWIO
     volumes:
       - backend-data:/app/data
-      - /run/dbus:/run/dbus  
+      - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
+      - /sys/class/gpio:/sys/class/gpio
     env_file:
       - .env
     environment:

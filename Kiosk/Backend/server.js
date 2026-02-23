@@ -10,6 +10,7 @@ const db = require("./database");
 const hardware = require("./serial");
 const syncService = require("./syncService");
 const wifiService = require("./wifiService");
+const gpioService = require("./gpioService");
 
 // Initialize App
 const app = express();
@@ -1076,6 +1077,9 @@ app.post("/api/scan/start", (req, res) => {
   if (hardware.sessionStart) {
     hardware.sessionStart();
   }
+  
+  // Set LED to Scanning Active visual state
+  gpioService.setScanning();
 
   hardware.startScan();
   res.json({ success: true, message: "Scan started" });
@@ -1100,6 +1104,7 @@ app.post("/api/session/end", (req, res) => {
   if (hardware.sessionEnd) {
     hardware.sessionEnd();
   }
+  gpioService.setIdle();
   res.json({ success: true, message: "Session ended" });
 });
 
@@ -1188,6 +1193,7 @@ app.post("/api/esp32/enable-rfid", (req, res) => {
   console.log("🔓 ENABLE_RFID received - Enabling scanner independently");
   if (hardware.enableRfid) {
     const result = hardware.enableRfid();
+    gpioService.setScanning();
     return res.json({
       success: true,
       message: "RFID scanner enabled",
@@ -1205,6 +1211,7 @@ app.post("/api/esp32/disable-rfid", (req, res) => {
   console.log("🔒 DISABLE_RFID received - Disabling scanner independently");
   if (hardware.disableRfid) {
     const result = hardware.disableRfid();
+    gpioService.setIdle();
     return res.json({
       success: true,
       message: "RFID scanner disabled",
