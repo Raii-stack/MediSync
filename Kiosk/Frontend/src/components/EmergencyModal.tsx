@@ -77,7 +77,6 @@ export function EmergencyModal({ isOpen, onClose, onConfirm }: EmergencyModalPro
 
   const sendEmergencyAlert = async () => {
     setStep('sending');
-    onConfirm(); // Trigger whatever external hook the parent wants
 
     try {
       const currentStudent = sessionStorage.getItem('currentStudent');

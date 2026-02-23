@@ -114,7 +114,7 @@ export function WelcomeScreen() {
         </h1>
         <p className="text-2xl text-gray-500 mb-20 flex items-center gap-2 animate-fade-in-up animation-delay-400">
           <Sparkles className="w-5 h-5 text-[#4A90E2] animate-sparkle" />
-          Your Smart Health Kiosk
+          Symptoms gone in a blink
         </p>
 
         {/* Instruction */}
