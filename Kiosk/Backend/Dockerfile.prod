@@ -13,6 +13,7 @@ WORKDIR /app
 
 RUN apk add --no-cache \
     networkmanager \
+    networkmanager-cli \
     dbus \
     tini \
     udev \

@@ -10,6 +10,7 @@ WORKDIR /app
 # - udev/eudev-libs: serial device access (ESP32)
 RUN apk add --no-cache \
     networkmanager \
+    networkmanager-cli \
     dbus \
     tini \
     udev \
