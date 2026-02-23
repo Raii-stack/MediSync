@@ -1,11 +1,5 @@
--- ==========================================
--- 1. CONFIGURATION & EXTENSIONS
--- ==========================================
-create extension if not exists "uuid-ossp";
 
--- ==========================================
--- 2. CORE IDENTITY TABLES (Green in ERD)
--- ==========================================
+create extension if not exists "uuid-ossp";
 
 -- Staff who manage the dashboard and receive alerts.
 create table public.clinic_staff (
@@ -23,8 +17,8 @@ create table public.clinic_staff (
 -- The master list of students.
 create table public.students (
   id uuid default uuid_generate_v4() primary key,
-  student_id text unique not null, -- School ID (e.g., 2024-001)
-  rfid_uid text unique not null,   -- Card ID
+  student_id text unique not null, 
+  rfid_uid text unique not null,   
   first_name text not null,
   last_name text not null,
   age int,
@@ -36,7 +30,7 @@ create table public.students (
 -- Sensitive info linked 1:1 to Students.
 create table public.medical_history (
   id uuid default uuid_generate_v4() primary key,
-  student_id uuid references public.students(id) on delete cascade unique,
+  student_id text references public.students(student_id) on delete cascade unique,
   blood_type text,
   allergies text,
   medical_conditions text,
@@ -46,44 +40,38 @@ create table public.medical_history (
   last_updated timestamp with time zone default now()
 );
 
--- Keeps track of your machines (e.g., "Kiosk 1 is in Room 301").
 create table public.kiosks (
-  kiosk_id text primary key, -- e.g., "KIOSK-01"
+  kiosk_id text primary key, 
   room_assigned text not null,
   status text default 'Online'
 );
-
--- ==========================================
--- 3. TRANSACTIONAL TABLES (Red in ERD)
--- ==========================================
 
 -- Cloud mirror of what is inside each machine.
 create table public.kiosk_inventory (
   id uuid default uuid_generate_v4() primary key,
   kiosk_id text references public.kiosks(kiosk_id),
+  slot_id int not null,
   medicine_name text not null,
   current_stock int default 0,
+  max_stock int default 50,
   last_synced timestamp with time zone default now(),
-  unique(kiosk_id, medicine_name) -- Prevent duplicates
+  unique(kiosk_id, slot_id) 
 );
- 
  
 create table public.medicines_library (
   id uuid default uuid_generate_v4() primary key,
   name text unique not null,
   description text,
   symptoms_target jsonb, 
-  image_url text,
   created_at timestamp with time zone default now()
 );
 
--- Real-time alerts sent from Kiosks.
 create table public.emergency_alerts (
   id uuid default uuid_generate_v4() primary key,
   kiosk_id text references public.kiosks(kiosk_id),
-  student_id uuid references public.students(id), -- Nullable (if anonymous)
+  rfid_uid text, 
   alert_message text,
-  alert_status text default 'PENDING', -- PENDING, RESOLVED
+  alert_status text default 'PENDING', 
   created_at timestamp with time zone default now(),
   confirmed_at timestamp with time zone
 );
@@ -92,43 +80,24 @@ create table public.emergency_alerts (
 create table public.kiosk_logs (
   id uuid default uuid_generate_v4() primary key,
   kiosk_id text references public.kiosks(kiosk_id),
-  student_id uuid references public.students(id),
-  unregistered_rfid_uid text,
-  symptoms_reported jsonb, -- Stores ["Headache", "Fever"]
-  pain_scale int,          -- Fixed: Changed from text to int
-  temp_reading decimal(4,1), -- Fixed: Changed to decimal
+  rfid_uid text,
+  symptoms_reported jsonb, 
+  pain_scale int,          
+  temp_reading decimal(4,1), 
   heart_rate_bpm int,
   medicine_dispensed text,
-  created_at timestamp with time zone default now(),
-  unregistered_rfid_uid text
+  created_at timestamp with time zone default now()
 );
 
 -- The official medical record (Manual + Automated).
 create table public.clinic_visits (
   id uuid default uuid_generate_v4() primary key,
-  student_id uuid references public.students(id),
+  student_id text references public.students(student_id),
   visit_source text check (visit_source in ('Kiosk', 'Walk-in', 'Emergency')),
   kiosk_id text references public.kiosks(kiosk_id),
-  attended_by uuid references public.clinic_staff(id), -- Null if Kiosk
+  attended_by text references public.clinic_staff(employee_id), 
   diagnosis text,
   treatment_given text,
   nurse_notes text,
   visit_date timestamp with time zone default now()
 );
-
--- ==========================================
--- 4. SECURITY (Row Level Security)
--- ==========================================
-alter table public.students enable row level security;
-alter table public.medical_history enable row level security;
-alter table public.clinic_visits enable row level security;
-
--- (For MVP, allow public access. Lock this down before production!)
-create policy "Public Access" on public.students for all using (true);
-create policy "Public Access" on public.medical_history for all using (true);
-create policy "Public Access" on public.clinic_visits for all using (true);
-create policy "Public Access" on public.kiosk_logs for all using (true);
-create policy "Public Access" on public.kiosk_inventory for all using (true);
-create policy "Public Access" on public.emergency_alerts for all using (true);
-create policy "Public Access" on public.clinic_staff for all using (true);
-create policy "Public Access" on public.kiosks for all using (true);

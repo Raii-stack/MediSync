@@ -32,6 +32,7 @@ const migrationError = new Promise((resolve) => {
       // Check what needs to be migrated
       const neededMigrations = [];
 
+      // Check students_cache
       if (!columnNames.includes("age")) {
         neededMigrations.push(
           "ALTER TABLE students_cache ADD COLUMN age INTEGER;",
@@ -58,50 +59,62 @@ const migrationError = new Promise((resolve) => {
         );
       }
 
-      if (neededMigrations.length > 0) {
-        console.log(
-          `🔄 Running ${neededMigrations.length} schema migrations...`,
-        );
-        migrationsTotal = neededMigrations.length;
+      // Chain the migrations to also check kiosk_logs
+      db.all("PRAGMA table_info(kiosk_logs)", (logErr, logCols) => {
+        if (!logErr && logCols) {
+          const logColNames = logCols.map((c) => c.name);
+          if (!logColNames.includes("rfid_uid")) {
+            neededMigrations.push(
+              "ALTER TABLE kiosk_logs ADD COLUMN rfid_uid TEXT;",
+            );
+          }
+        }
 
-        neededMigrations.forEach((migration) => {
-          db.run(migration, (err) => {
-            migrationsApplied++;
-            if (err) {
-              console.log("Migration already applied or info:", err.message);
-            } else {
-              console.log(
-                "✓ Migration applied:",
-                migration.substring(0, 50) + "...",
-              );
-            }
+        if (neededMigrations.length > 0) {
+          console.log(
+            `🔄 Running ${neededMigrations.length} schema migrations...`,
+          );
+          migrationsTotal = neededMigrations.length;
 
-            // Resolve promise when all migrations are attempted
-            if (migrationsApplied === migrationsTotal) {
-              console.log("✓ All migrations completed");
+          neededMigrations.forEach((migration) => {
+            db.run(migration, (runErr) => {
+              migrationsApplied++;
+              if (runErr) {
+                console.log("Migration already applied or info:", runErr.message);
+              } else {
+                console.log(
+                  "✓ Migration applied:",
+                  migration.substring(0, 50) + "...",
+                );
+              }
 
-              // Update NULL created_at values for existing records
-              db.run(
-                "UPDATE students_cache SET created_at = datetime('now') WHERE created_at IS NULL",
-                (updateErr) => {
-                  if (updateErr) {
-                    console.log(
-                      "Info: Could not update created_at:",
-                      updateErr.message,
-                    );
-                  } else {
-                    console.log("✓ Updated created_at for existing records");
-                  }
-                  resolve();
-                },
-              );
-            }
+              // Resolve promise when all migrations are attempted
+              if (migrationsApplied === migrationsTotal) {
+                console.log("✓ All migrations completed");
+
+                // Update NULL created_at values for existing records
+                db.run(
+                  "UPDATE students_cache SET created_at = datetime('now') WHERE created_at IS NULL",
+                  (updateErr) => {
+                    if (updateErr) {
+                      console.log(
+                        "Info: Could not update created_at:",
+                        updateErr.message,
+                      );
+                    } else {
+                      console.log("✓ Updated created_at for existing records");
+                    }
+                    resolve();
+                  },
+                );
+              }
+            });
           });
-        });
-      } else {
-        console.log("✓ Schema is up to date");
-        resolve();
-      }
+        } else {
+          console.log("✓ Schema is up to date");
+          resolve();
+        }
+      });
     });
   });
 });

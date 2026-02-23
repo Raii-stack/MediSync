@@ -115,12 +115,9 @@ async function ensureKioskExists() {
 async function pushKioskLogs() {
   console.log("[SYNC-A] Pushing unsynced kiosk_logs...");
 
-  // Join with students_cache to get the UUID for registered students
   const rows = await dbAll(
-    `SELECT kl.*,
-            COALESCE(sc.student_uuid, NULL) AS student_uuid
+    `SELECT kl.*
      FROM   kiosk_logs kl
-     LEFT JOIN students_cache sc ON kl.student_id = sc.student_id
      WHERE  kl.synced = 0
      ORDER  BY kl.created_at ASC`,
   );
@@ -132,33 +129,9 @@ async function pushKioskLogs() {
 
   console.log(`[SYNC-A] Found ${rows.length} unsynced log(s)`);
 
-  // For logs with an unregistered RFID, do a one-shot cloud lookup to see if
-  // an admin has since registered that RFID — resolve the student if found.
-  const unreg = rows.filter(r => !r.student_uuid && r.unregistered_rfid_uid);
-  for (const log of unreg) {
-    const { data: student } = await _supabase
-      .from("students")
-      .select("id, student_id, rfid_uid, first_name, last_name")
-      .eq("rfid_uid", log.unregistered_rfid_uid)
-      .single();
-
-    if (student) {
-      console.log(
-        `[SYNC-A] Resolved RFID ${log.unregistered_rfid_uid} → student ${student.first_name} ${student.last_name}`,
-      );
-      log.student_uuid = student.id;
-      // Patch local log so we don't re-resolve next cycle
-      await dbRun(
-        "UPDATE kiosk_logs SET student_id = ? WHERE id = ?",
-        [student.student_id || student.id, log.id],
-      );
-    }
-  }
-
   const payload = rows.map(r => ({
     kiosk_id: _kioskId,
-    student_id: r.student_uuid || null,
-    unregistered_rfid_uid: !r.student_uuid ? r.unregistered_rfid_uid : null,
+    rfid_uid: r.rfid_uid || null,
     symptoms_reported: r.symptoms
       ? r.symptoms.split(",").map(s => s.trim()).filter(Boolean)
       : [],
@@ -335,12 +308,15 @@ async function pullStudentsAndReconcile() {
   console.log(`[SYNC-E] ✅ Upserted ${cloudStudents.length} student(s) into students_cache`);
 
   // --- E.2 RFID Reconciliation ---
-  // Fetch all unregistered RFID UIDs that are still in kiosk_logs
+  // Fetch all RFIDs that have used the kiosk but aren't registered to it as "students" yet.
   const unregisteredRows = await dbAll(
-    `SELECT DISTINCT unregistered_rfid_uid
+    `SELECT DISTINCT rfid_uid
      FROM   kiosk_logs
-     WHERE  unregistered_rfid_uid IS NOT NULL
-       AND  unregistered_rfid_uid != ''`,
+     WHERE  rfid_uid IS NOT NULL
+       AND  rfid_uid != ''
+       AND  rfid_uid NOT IN (
+         SELECT rfid_uid FROM kiosk_students WHERE rfid_uid IS NOT NULL
+       )`,
   );
 
   if (!unregisteredRows.length) {
@@ -348,7 +324,7 @@ async function pullStudentsAndReconcile() {
     return;
   }
 
-  const unregisteredUids = new Set(unregisteredRows.map(r => r.unregistered_rfid_uid));
+  const unregisteredUids = new Set(unregisteredRows.map(r => r.rfid_uid));
   console.log(`[SYNC-E] 🔍 Checking ${unregisteredUids.size} unregistered RFID(s) against pulled students...`);
 
   let reconciled = 0;

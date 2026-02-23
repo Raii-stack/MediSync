@@ -110,8 +110,7 @@ db.run(
   `
   CREATE TABLE IF NOT EXISTS kiosk_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id TEXT,
-    unregistered_rfid_uid TEXT,
+    rfid_uid TEXT,
     symptoms TEXT,
     pain_scale INTEGER,
     temp_reading DECIMAL,

@@ -9,6 +9,7 @@ require("dotenv").config();
 const db = require("./database");
 const hardware = require("./serial");
 const syncService = require("./syncService");
+const wifiService = require("./wifiService");
 
 // Initialize App
 const app = express();
@@ -37,8 +38,7 @@ function pushKioskLogToCloud(payload, onSuccess) {
 function logUnregisteredRfid(uid, timestamp) {
   const payload = {
     kiosk_id: KIOSK_ID,
-    student_id: null,
-    unregistered_rfid_uid: uid,
+    rfid_uid: uid,
     symptoms_reported: [],
     pain_scale: null,
     temp_reading: null,
@@ -50,10 +50,10 @@ function logUnregisteredRfid(uid, timestamp) {
   db.run(
     `
       INSERT INTO kiosk_logs 
-      (student_id, unregistered_rfid_uid, symptoms, pain_scale, temp_reading, heart_rate, medicine_dispensed, slot_used, synced, created_at) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+      (rfid_uid, symptoms, pain_scale, temp_reading, heart_rate, medicine_dispensed, slot_used, synced, created_at) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
     `,
-    [null, uid, "", null, null, null, null, null, timestamp],
+    [uid, "", null, null, null, null, null, timestamp],
     function (err) {
       if (err) {
         console.error("Error logging unregistered RFID:", err.message);
@@ -911,7 +911,7 @@ app.post("/api/admin/slots", (req, res) => {
 
 // POST: Dispense Medicine (Dynamic Slots)
 app.post("/api/dispense", (req, res) => {
-  const { medicine, student_id, student_name, symptoms, pain_level, vitals } =
+  const { medicine, student_id, rfid_uid, student_name, symptoms, pain_level, vitals } =
     req.body;
 
   console.log(
@@ -957,13 +957,12 @@ app.post("/api/dispense", (req, res) => {
       const timestamp = new Date().toISOString();
       const stmt = db.prepare(`
         INSERT INTO kiosk_logs 
-        (student_id, unregistered_rfid_uid, symptoms, pain_scale, temp_reading, heart_rate, medicine_dispensed, slot_used, synced, created_at) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+        (rfid_uid, symptoms, pain_scale, temp_reading, heart_rate, medicine_dispensed, slot_used, synced, created_at) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
       `);
 
       stmt.run(
-        student_id || "ANON",
-        null,
+        rfid_uid || null,
         Array.isArray(symptoms) ? symptoms.join(",") : symptoms || "",
         pain_level || null,
         vitals?.temp || null,
@@ -988,12 +987,12 @@ app.post("/api/dispense", (req, res) => {
 
           const logPayloadBase = {
             kiosk_id: KIOSK_ID,
+            rfid_uid: rfid_uid || null,
             symptoms_reported: symptomsArray,
             pain_scale: pain_level || null,
             temp_reading: vitals?.temp || null,
             heart_rate_bpm: vitals?.bpm || null,
             medicine_dispensed: medicine,
-            unregistered_rfid_uid: null,
             created_at: timestamp,
           };
 
@@ -1015,44 +1014,7 @@ app.post("/api/dispense", (req, res) => {
             );
           };
 
-          if (localStudentId) {
-            db.get(
-              "SELECT student_uuid FROM students_cache WHERE student_id = ?",
-              [localStudentId],
-              (uuidErr, uuidRow) => {
-                if (uuidErr) {
-                  console.error(
-                    "[CLOUD] Failed to fetch student UUID:",
-                    uuidErr.message,
-                  );
-                  pushKioskLogToCloud(
-                    {
-                      ...logPayloadBase,
-                      student_id: null,
-                    },
-                    markSynced,
-                  );
-                  return;
-                }
-
-                pushKioskLogToCloud(
-                  {
-                    ...logPayloadBase,
-                    student_id: uuidRow?.student_uuid || null,
-                  },
-                  markSynced,
-                );
-              },
-            );
-          } else {
-            pushKioskLogToCloud(
-              {
-                ...logPayloadBase,
-                student_id: null,
-              },
-              markSynced,
-            );
-          }
+          pushKioskLogToCloud(logPayloadBase, markSynced);
         },
       );
       stmt.finalize();
@@ -1069,65 +1031,17 @@ app.post("/api/dispense", (req, res) => {
 
 // --- ADMIN API: WiFi Network Management ---
 // GET: Scan for WiFi networks
-app.get("/api/scan", (req, res) => {
-  console.log("📡 WiFi Scan requested");
-
-  try {
-    // Use nmcli to scan for networks on Raspberry Pi
-    try {
-      execSync("nmcli dev wifi rescan", { timeout: 10000, stdio: "pipe" });
-    } catch (rescanError) {
-      console.warn("⚠️  WiFi rescan failed:", rescanError.message);
-    }
-
-    const output = execSync(
-      "nmcli -t -f SSID,SIGNAL,SECURITY,ACTIVE dev wifi list",
-      { timeout: 15000, stdio: ["pipe", "pipe", "pipe"] },
-    )
-      .toString()
-      .trim();
-
-    let networks = [];
-
-    if (output) {
-      // Parse nmcli terse output format: SSID:SIGNAL:SECURITY:ACTIVE
-      // nmcli -t escapes literal colons as \: within field values,
-      // so we must split on unescaped colons only.
-      const lines = output.split("\n").filter((line) => line.trim());
-
-      networks = lines
-        .map((line) => {
-          // Split on colons that are NOT preceded by a backslash
-          const fields = line
-            .split(/(?<!\\):/)
-            .map((f) => f.replace(/\\:/g, ":"));
-          const [ssid, signal, security, active] = fields;
-          return {
-            ssid: ssid || "Hidden Network",
-            signalStrength: parseInt(signal) || 0,
-            security:
-              security && security !== "--" ? security.split(" ")[0] : "Open",
-            isConnected: active === "yes",
-          };
-        })
-        .filter((net) => net.ssid); // Remove empty entries
-    }
-
-    res.json({
-      success: true,
-      networks: networks.slice(0, 20), // Limit to 20 networks
-    });
-  } catch (error) {
-    console.error("❌ WiFi scan error:", error.message);
-    res.status(500).json({
-      success: false,
-      error: "Failed to scan for networks",
-    });
+app.get("/api/scan", async (req, res) => {
+  const result = await wifiService.scanWifi();
+  if (result.success) {
+    res.json(result);
+  } else {
+    res.status(500).json(result);
   }
 });
 
 // POST: Connect to WiFi network
-app.post("/api/connect", (req, res) => {
+app.post("/api/connect", async (req, res) => {
   const { ssid, password } = req.body;
 
   if (!ssid) {
@@ -1137,35 +1051,17 @@ app.post("/api/connect", (req, res) => {
     });
   }
 
-  console.log(`📶 Attempting to connect to WiFi: ${ssid}`);
-
-  try {
-    // Use nmcli to connect to the network
-    if (password) {
-      // Connect with password (WPA2/WPA3)
-      execSync(`nmcli dev wifi connect "${ssid}" password "${password}"`, {
-        timeout: 30000,
-        stdio: "pipe",
-      });
-    } else {
-      // Connect without password (Open networks)
-      execSync(`nmcli dev wifi connect "${ssid}"`, {
-        timeout: 30000,
-        stdio: "pipe",
-      });
-    }
-
-    console.log(`✅ Successfully connected to ${ssid}`);
+  const result = await wifiService.connectToWifi(ssid, password);
+  if (result.success) {
     res.json({
       success: true,
-      message: `Connected to ${ssid}`,
+      message: result.message,
       ssid,
     });
-  } catch (error) {
-    console.error(`❌ Failed to connect to ${ssid}:`, error.message);
+  } else {
     res.status(500).json({
       success: false,
-      error: error.message || `Failed to connect to ${ssid}`,
+      error: result.message || `Failed to connect to ${ssid}`,
     });
   }
 });
@@ -1287,20 +1183,58 @@ app.post("/api/rfid-test/stop", (req, res) => {
   });
 });
 
+// POST: Explicitly enable RFID scanner
+app.post("/api/esp32/enable-rfid", (req, res) => {
+  console.log("🔓 ENABLE_RFID received - Enabling scanner independently");
+  if (hardware.enableRfid) {
+    const result = hardware.enableRfid();
+    return res.json({
+      success: true,
+      message: "RFID scanner enabled",
+      mode: result.mode,
+    });
+  }
+  res.status(500).json({
+    success: false,
+    message: "Hardware not available",
+  });
+});
+
+// POST: Explicitly disable RFID scanner
+app.post("/api/esp32/disable-rfid", (req, res) => {
+  console.log("🔒 DISABLE_RFID received - Disabling scanner independently");
+  if (hardware.disableRfid) {
+    const result = hardware.disableRfid();
+    return res.json({
+      success: true,
+      message: "RFID scanner disabled",
+      mode: result.mode,
+    });
+  }
+  res.status(500).json({
+    success: false,
+    message: "Hardware not available",
+  });
+});
+
 // POST: Emergency Alert
 app.post("/api/emergency", (req, res) => {
-  const { student_id } = req.body;
+  const { student_id, rfid_uid, equipment } = req.body;
   const timestamp = new Date().toISOString();
 
   console.log(`🚨 EMERGENCY ALERT TRIGGERED`);
   console.log(`   Kiosk: ${KIOSK_ID}`);
   console.log(`   Student ID: ${student_id || "Unknown"}`);
+  console.log(`   RFID UID: ${rfid_uid || "None"}`);
+  console.log(`   Equipment: ${equipment || "None"}`);
   console.log(`   Time: ${timestamp}`);
 
   const emergencyData = {
     kiosk_id: KIOSK_ID,
     student_id: student_id || null,
+    rfid_uid: rfid_uid || null,
     timestamp,
+    equipment: equipment || null,
     alert_type: "emergency_button",
   };
 

@@ -414,4 +414,30 @@ module.exports = {
       return { success: true, mode: "simulation" };
     }
   },
+
+  // Explicitly enable the RFID scanner without starting a full active medical session
+  enableRfid: () => {
+    if (!isSimulationMode && port && port.isOpen) {
+      const command = JSON.stringify({ command: "enable_rfid" });
+      port.write(`${command}\n`);
+      console.log(`📤 Sent to ESP32: ${command}`);
+      return { success: true, mode: "real_hardware" };
+    } else {
+      console.log(`[SIM] 🔓 RFID scanning explicitly enabled`);
+      return { success: true, mode: "simulation" };
+    }
+  },
+
+  // Explicitly disable the RFID scanner without forcing a full session end
+  disableRfid: () => {
+    if (!isSimulationMode && port && port.isOpen) {
+      const command = JSON.stringify({ command: "disable_rfid" });
+      port.write(`${command}\n`);
+      console.log(`📤 Sent to ESP32: ${command}`);
+      return { success: true, mode: "real_hardware" };
+    } else {
+      console.log(`[SIM] 🔒 RFID scanning explicitly disabled`);
+      return { success: true, mode: "simulation" };
+    }
+  },
 };
