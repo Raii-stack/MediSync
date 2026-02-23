@@ -14,52 +14,70 @@ export function SymptomsScreen() {
   const symptoms = [
     {
       id: "fever",
-      label: "Fever",
+      label: "FEVER",
       emoji: "🤒",
       color: "from-red-500 to-orange-500",
     },
     {
-      id: "headache",
-      label: "Headache",
+      id: "mild-moderate-pain",
+      label: "MILD & MODERATE PAIN",
       emoji: "🤕",
+      color: "from-yellow-500 to-amber-500",
+    },
+    {
+      id: "headache",
+      label: "HEADACHE",
+      emoji: "😫",
       color: "from-purple-500 to-pink-500",
     },
     {
       id: "colds",
-      label: "Colds",
+      label: "COLDS",
       emoji: "🤧",
       color: "from-blue-500 to-cyan-500",
     },
     {
-      id: "abdominal",
-      label: "Abdominal Pain",
+      id: "food-drug-allergy",
+      label: "FOOD OR DRUG ALLERGY",
+      emoji: "🥜",
+      color: "from-amber-600 to-orange-600",
+    },
+    {
+      id: "allergic-rhinitis",
+      label: "ALLERGIC RHINITIS",
+      emoji: "🌸",
+      color: "from-rose-400 to-pink-500",
+    },
+    {
+      id: "abdominal-pain",
+      label: "ABDOMINAL PAIN",
       emoji: "😷",
       color: "from-orange-500 to-yellow-500",
     },
     {
-      id: "dysmenorrhea",
-      label: "Dysmenorrhea",
-      emoji: "🩺",
+      id: "menstrual-pain",
+      label: "MENSTRUAL PAIN",
+      emoji: "🩸",
       color: "from-pink-500 to-rose-500",
     },
     {
       id: "dehydration",
-      label: "Dehydration",
+      label: "DEHYDRATION",
       emoji: "💧",
       color: "from-cyan-500 to-blue-500",
     },
     {
-      id: "vomiting",
-      label: "Vomiting",
+      id: "mild-vomiting",
+      label: "MILD VOMITING",
       emoji: "🤮",
       color: "from-green-500 to-emerald-500",
     },
     {
       id: "diarrhea",
-      label: "Diarrhea",
+      label: "DIARRHEA",
       emoji: "🚽",
-      color: "from-amber-500 to-orange-500",
-    },
+      color: "from-amber-700 to-orange-800",
+    }
   ];
 
   const toggleSymptom = (id: string) => {
