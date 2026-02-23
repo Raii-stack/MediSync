@@ -17,6 +17,7 @@ services:
       - backend-data:/app/data
       - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
       - /sys/class/gpio:/sys/class/gpio
+      - /dev/pi-blaster:/dev/pi-blaster
     env_file:
       - .env
     environment:

@@ -19,6 +19,7 @@ services:
       - backend-data:/app/data
       - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
       - /sys/class/gpio:/sys/class/gpio
+      - /dev/pi-blaster:/dev/pi-blaster
     env_file:
       - .env
     environment:
@@ -44,7 +45,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "80:5173"  
+      - "80:5173"
     networks:
       - medisync-network
     environment:

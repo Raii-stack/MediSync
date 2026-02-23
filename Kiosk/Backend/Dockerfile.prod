@@ -1,19 +1,16 @@
-# Production Dockerfile for Backend - Optimized for Raspberry Pi
-# Build stage
+
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
-# Production stage
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Install NetworkManager CLI for WiFi management + serial access tools
 RUN apk add --no-cache \
     networkmanager \
     dbus \
@@ -21,7 +18,6 @@ RUN apk add --no-cache \
     udev \
     eudev-libs
 
-# Add node user to dialout group for serial device access
 RUN addgroup node dialout && \
     chown -R node:node /app
 
@@ -31,10 +27,8 @@ COPY . .
 
 EXPOSE 3001
 
-# Run as node user with proper permissions
 USER node
 
-# Use tini to handle signals properly
 ENTRYPOINT ["/sbin/tini", "--"]
 
 CMD ["npm", "start"]

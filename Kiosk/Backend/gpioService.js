@@ -1,12 +1,12 @@
 const { execSync } = require('child_process');
 
-// Graceful GPIO Fallback for Windows/Mac development
-let Gpio;
+// Graceful PWM Fallback for Windows/Mac development
+let piblaster;
 try {
-  Gpio = require('onoff').Gpio;
+  piblaster = require('pi-blaster.js');
 } catch (e) {
-  console.warn("⚠️  'onoff' module not found or unsupported. GPIO control is running in Mock Mode.");
-  Gpio = null;
+  console.warn("⚠️  'pi-blaster.js' module not found or unsupported. PWM LED control is running in Mock Mode.");
+  piblaster = null;
 }
 
 class GPIOService {
@@ -15,60 +15,70 @@ class GPIOService {
     this.RFID_R_PIN = 23;
     this.RFID_G_PIN = 24;
 
-    this.rfidLedR = null;
-    this.rfidLedG = null;
+    this.LED_ACTIVE_LOW = false; 
 
-    if (Gpio) {
-      try {
-        this.rfidLedR = new Gpio(this.RFID_R_PIN, 'out');
-        this.rfidLedG = new Gpio(this.RFID_G_PIN, 'out');
-        console.log(`✅ GPIO Initialized on BCM pins R:${this.RFID_R_PIN}, G:${this.RFID_G_PIN}`);
-        this.setIdle(); // Default hardware state
-      } catch (err) {
-        console.error("❌ Failed to initialize RPi GPIO pins:", err.message);
-        Gpio = null;
-      }
+    if (piblaster) {
+      console.log(`✅ Pi-Blaster PWM Initialized on BCM pins R:${this.RFID_R_PIN}, G:${this.RFID_G_PIN}`);
+      this.setIdle(); // Default hardware state
     }
   }
 
   // --- LED Abstractions ---
 
-  setRfidLed(redState, greenState) {
-    if (!Gpio || !this.rfidLedR || !this.rfidLedG) {
-      // console.log(`[GPIO MOCK] RFID LED state -> R: ${redState}, G: ${greenState}`);
+  /* 
+   * Replicates esp32.ino setColor logic for RPi using soft-PWM (0 to 1 float range).
+   * r: 0-255 (Red intensity)
+   * g: 0-255 (Green intensity)
+   */
+  setRfidLed(r, g) {
+    if (!piblaster) {
+      // console.log(`[GPIO PWM MOCK] RFID LED state -> R: ${r}, G: ${g}`);
       return;
     }
-    
-    // Active High logic. Swap 1 & 0 if your relays/transistors are Active Low.
-    this.rfidLedR.writeSync(redState ? 1 : 0);
-    this.rfidLedG.writeSync(greenState ? 1 : 0);
+
+    // Sanitize ESP32 0-255 args down to Pi-Blaster 0.0 - 1.0 floats
+    r = Math.max(0, Math.min(255, r));
+    g = Math.max(0, Math.min(255, g));
+
+    let rFloat = r / 255.0;
+    let gFloat = g / 255.0;
+
+    // Apply Active-Low inversion if required by the hardware wiring
+    if (this.LED_ACTIVE_LOW) {
+        // If Active-Low, 1.0 (High) is OFF, 0.0 (Low) is ON.
+        rFloat = 1.0 - rFloat;
+        gFloat = 1.0 - gFloat;
+    }
+
+    // Drive the pins
+    piblaster.setPwm(this.RFID_R_PIN, rFloat);
+    piblaster.setPwm(this.RFID_G_PIN, gFloat);
   }
 
   // Solid Green indicating idle / ready
   setIdle() {
-    this.setRfidLed(false, true);
+    this.setRfidLed(0, 255);
   }
 
   // Solid Red indicating scanning active
   setScanning() {
-    this.setRfidLed(true, false);
+    this.setRfidLed(255, 0);
   }
 
-  // Blinking Red/Green indicating processing or error
+  // Yellow-ish indicating processing or error
   setAlert() {
-    this.setRfidLed(true, true); // Yellow-ish if driven simultaneously
+    this.setRfidLed(255, 255); 
   }
 
   // Off
   setOff() {
-    this.setRfidLed(false, false);
+    this.setRfidLed(0, 0);
   }
 
   // --- Cleanup Hook ---
-  
   cleanup() {
-    if (this.rfidLedR) this.rfidLedR.unexport();
-    if (this.rfidLedG) this.rfidLedG.unexport();
+    // Restore default passive states upon destruction
+    this.setOff();
   }
 }
 
