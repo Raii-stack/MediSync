@@ -234,7 +234,6 @@ async function pushLocalStudents() {
         age: ls.age || null,
         grade_level: ls.grade_level || null,
         section: ls.section || "",
-        medical_flags: ls.medical_flags || "",
       });
     }
   });
@@ -354,8 +353,8 @@ async function pullStudentsAndReconcile() {
     const stmt = _db.prepare(
       `INSERT OR REPLACE INTO students_cache
          (student_id, student_uuid, rfid_uid, first_name, last_name,
-          age, grade_level, section, medical_flags)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          age, grade_level, section)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     cloudStudents.forEach(s =>
       stmt.run(
@@ -367,7 +366,6 @@ async function pullStudentsAndReconcile() {
         s.age ?? null,
         s.grade_level ?? null,
         s.section ?? "",
-        s.medical_flags ?? "",
       ),
     );
     stmt.finalize(err => (err ? reject(err) : resolve()));
