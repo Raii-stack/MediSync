@@ -1,6 +1,7 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useEffect } from "react";
 import { EmergencyButton } from "./EmergencyButton";
 import { EmergencyModal } from "./EmergencyModal";
+import { useSocket } from "../contexts/SocketContext";
 
 interface KioskLayoutProps {
   children: ReactNode;
@@ -16,6 +17,22 @@ export function KioskLayout({
   showVersion = false,
 }: KioskLayoutProps) {
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
+  const { socket } = useSocket();
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handlePhysicalEmergency = () => {
+      console.log("🚨 Physical emergency button pressed. Opening modal...");
+      setIsEmergencyModalOpen(true);
+    };
+
+    socket.on("physical-emergency-trigger", handlePhysicalEmergency);
+
+    return () => {
+      socket.off("physical-emergency-trigger", handlePhysicalEmergency);
+    };
+  }, [socket]);
 
   return (
     <div className="h-screen w-screen bg-gradient-to-br from-gray-50 to-blue-50 flex flex-col overflow-hidden relative">

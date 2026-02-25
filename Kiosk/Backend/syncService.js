@@ -13,8 +13,8 @@
  *  0. Ensure kiosk record exists in cloud
  *  A. PUSH kiosk_logs      (local → cloud)   upward
  *  B. PUSH kiosk_slots     (local → cloud)   upward  (kiosk is SoT for stock)
- *  C. PULL medicines_library (cloud → local)  downward
- *  D. PULL kiosk_inventory slot configurations (cloud → local, max_stock / medicine assignment only)
+ *  C. PUSH new students    (local → cloud)   upward  (sync local registrations)
+ *  D. PULL medicines_library (cloud → local)  downward
  *  E. PULL cloud students  (cloud → local)   downward + RFID Reconciliation
  *     - Upsert into students_cache
  *     - If a pulled student's rfid_uid matches an unregistered_rfid_uid in
@@ -22,8 +22,8 @@
  *
  * DATA OWNERSHIP
  * ──────────────
- *  Source of truth  LOCAL  : kiosk_slots (stock levels), kiosk_logs
- *  Source of truth  CLOUD  : students, medicines_library, slot config (max_stock / assignments)
+ *  Source of truth  LOCAL  : kiosk_slots (stock levels + assignments), kiosk_logs, initial student registrations
+ *  Source of truth  CLOUD  : generic clinic students, medicines_library
  *
  * USAGE
  * ──────
@@ -190,10 +190,78 @@ async function pushInventory() {
   console.log(`[SYNC-B] ✅ Pushed ${slots.length} slot(s) to cloud`);
 }
 
-// ─── Step C: PULL medicines_library ──────────────────────────────────────────
+// ─── Step C: PUSH new students (Local → Cloud) ───────────────────────────────
+
+/**
+ * Pushes any student from the local `students_cache` that does not exist 
+ * in the cloud `students` table.
+ */
+async function pushLocalStudents() {
+  console.log("[SYNC-C] Pushing offline student registrations to cloud...");
+
+  // 1. Fetch all local students
+  const localStudents = await dbAll(
+    "SELECT * FROM students_cache WHERE student_id IS NOT NULL",
+  );
+
+  if (!localStudents.length) {
+    console.log("[SYNC-C] ✓ No local students found");
+    return;
+  }
+
+  // 2. Fetch all cloud student IDs
+  const { data: cloudStudents, error } = await _supabase
+    .from("students")
+    .select("student_id");
+
+  if (error) {
+    console.error("[SYNC-C] ❌ Fetch cloud students failed:", error.message);
+    return;
+  }
+
+  const cloudIds = new Set(cloudStudents.map((s) => s.student_id));
+  const newStudents = [];
+
+  // 3. See which local ones are missing in the cloud
+  localStudents.forEach((ls) => {
+    // Only push if it doesn't exist in the cloud AND isn't our placeholder Guest
+    if (!cloudIds.has(ls.student_id) && !ls.student_id.startsWith("UNCACHED_")) {
+      newStudents.push({
+        student_id: ls.student_id,
+        rfid_uid: ls.rfid_uid || null,
+        first_name: ls.first_name || "",
+        last_name: ls.last_name || "",
+        age: ls.age || null,
+        grade_level: ls.grade_level || null,
+        section: ls.section || "",
+        medical_flags: ls.medical_flags || "",
+      });
+    }
+  });
+
+  if (!newStudents.length) {
+    console.log("[SYNC-C] ✓ No new local students to push");
+    return;
+  }
+
+  console.log(`[SYNC-C] Pushing ${newStudents.length} new student(s) to cloud...`);
+
+  // 4. Batch push to cloud
+  const { error: insertErr } = await _supabase
+    .from("students")
+    .insert(newStudents);
+
+  if (insertErr) {
+    console.error("[SYNC-C] ❌ Push failed:", insertErr.message);
+  } else {
+    console.log(`[SYNC-C] ✅ Successfully pushed ${newStudents.length} student(s)`);
+  }
+}
+
+// ─── Step D: PULL medicines_library ──────────────────────────────────────────
 
 async function pullMedicines() {
-  console.log("[SYNC-C] Pulling medicines_library from cloud...");
+  console.log("[SYNC-D] Pulling medicines_library from cloud...");
 
   const { data, error } = await _supabase.from("medicines_library").select("*");
 
@@ -405,10 +473,10 @@ async function runSyncCycle() {
     // ── Upward (Local → Cloud) ─────────────────────────────────────────────
     await pushKioskLogs();          // Step A
     await pushInventory();          // Step B
+    await pushLocalStudents();      // Step C (Conditional offline registration sync)
 
     // ── Downward (Cloud → Local) ───────────────────────────────────────────
-    await pullMedicines();          // Step C
-    await pullSlotConfigurations(); // Step D
+    await pullMedicines();          // Step D
     await pullStudentsAndReconcile(); // Step E  (includes RFID reconciliation)
 
     console.log(`[SYNC] ✅ Cycle complete at ${new Date().toLocaleTimeString()}\n`);

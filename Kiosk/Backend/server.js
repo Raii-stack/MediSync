@@ -391,30 +391,9 @@ hardware.onData((event) => {
   }
 
   if (event.type === "emergency") {
-    console.log(`🚨 EMERGENCY BUTTON - Physical device triggered`);
-    const timestamp = new Date().toISOString();
-
-    const emergencyData = {
-      kiosk_id: KIOSK_ID,
-      student_id: null, // Physical button doesn't know who pressed it
-      timestamp,
-      alert_type: "physical_button",
-      source: event.source || "physical_button",
-    };
-
-    // Emit to local UI
-    io.emit("emergency-alert", emergencyData);
-
-    // Emit to clinic app via socket
-    if (clinicSocket && clinicSocket.connected) {
-      clinicSocket.emit("kiosk-emergency", emergencyData);
-      console.log(`✅ Physical emergency alert sent to clinic app`);
-    } else {
-      console.error(
-        "❌ Clinic socket not connected. Physical emergency alert not sent.",
-      );
-    }
-
+    console.log(`🚨 EMERGENCY BUTTON - Physical device triggered, telling UI to open modal`);
+    // Emit to local UI to show the Emergency Modal
+    io.emit("physical-emergency-trigger");
     return;
   }
 

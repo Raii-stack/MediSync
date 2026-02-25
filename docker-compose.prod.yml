@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   backend:
     build:
@@ -6,33 +8,19 @@ services:
       args:
         - NODE_ENV=production
     container_name: medisync-backend-prod
-    network_mode: host
-    privileged: true
-    user: "0"
-    devices:
-      - "/dev/ttyS0:/dev/serial0"
-      - "/dev/gpiomem:/dev/gpiomem"
-    cap_add:
-      - NET_ADMIN
-      - SYS_RAWIO
+    ports:
+      - "3001:3001"
     volumes:
       - backend-data:/app/data
-      - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
-      - /sys/class/gpio:/sys/class/gpio
-      - /dev/pi-blaster:/dev/pi-blaster
-    env_file:
-      - .env
+      - /run/dbus:/run/dbus  # Required for WiFi management via NetworkManager
     environment:
       - NODE_ENV=production
       - KIOSK_ID=${KIOSK_ID:-kiosk-001}
-      - ESP32_SERIAL_PORT=/dev/serial0
-      - ESP32_BAUD_RATE=115200
-      - ESP32_ENABLED=true
       - CLINIC_SOCKET_URL=${CLINIC_SOCKET_URL:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      - SYNC_INTERVAL=${SYNC_INTERVAL:-60}
-      - ROOM_ASSIGNED=${ROOM_ASSIGNED:-Room TBD}
     restart: always
+    networks:
+      - medisync-network
 
   frontend:
     build:
@@ -45,7 +33,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "80:5173"
+      - "80:5173"  # Serve on HTTP port 80 (or 443 for HTTPS)
     networks:
       - medisync-network
     environment:
