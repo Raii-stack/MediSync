@@ -465,18 +465,11 @@ app.post("/api/login", (req, res) => {
         );
         res.json({ success: true, student: row });
       } else {
-        // Auto-register "Unknown" students for testing
-        console.log(
-          `⚠️  Unknown student ID: ${student_id} - allowing as Guest`,
-        );
-        res.json({
-          success: true,
-          student: {
-            student_id,
-            first_name: "Guest",
-            last_name: "Student",
-            section: "N/A",
-          },
+        console.log(`⚠️  Unknown student ID: ${student_id} - login rejected`);
+        res.status(401).json({
+          success: false,
+          error: "Unregistered Student",
+          message: "You are not registered in the system. Please proceed to the clinic admin to register.",
         });
       }
     },
