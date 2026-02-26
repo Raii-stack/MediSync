@@ -96,6 +96,8 @@ if (CLINIC_SOCKET_URL) {
 
   clinicSocket.on("connect", () => {
     console.log(`✅ Connected to clinic app (Socket ID: ${clinicSocket.id})`);
+    // Register the kiosk with the clinic app
+    clinicSocket.emit("register_kiosk", { kiosk_id: KIOSK_ID });
   });
 
   clinicSocket.on("disconnect", () => {
@@ -481,67 +483,43 @@ app.post("/api/login", (req, res) => {
   );
 });
 
-// GET: Fetch all students from cache
-app.get("/api/students", (req, res) => {
-  db.all(
-    "SELECT id, student_id, rfid_uid, first_name, last_name, age, grade_level, section, COALESCE(created_at, datetime('now')) as created_at FROM students_cache ORDER BY first_name",
-    (err, rows) => {
-      if (err) {
-        // If created_at column doesn't exist, try without it
-        if (err.message.includes("no such column: created_at")) {
-          console.log("⚠️  created_at column missing, running migration...");
-          db.run(
-            "ALTER TABLE students_cache ADD COLUMN created_at DATETIME",
-            (migErr) => {
-              if (migErr && !migErr.message.includes("duplicate column")) {
-                console.error("Migration failed:", migErr.message);
-                return res
-                  .status(500)
-                  .json({ success: false, error: migErr.message });
-              }
-              // Update existing records to set created_at
-              db.run(
-                "UPDATE students_cache SET created_at = datetime('now') WHERE created_at IS NULL",
-                (updateErr) => {
-                  if (updateErr) {
-                    console.log(
-                      "Info: Could not update created_at:",
-                      updateErr.message,
-                    );
-                  }
-                  // Retry the query after migration
-                  db.all(
-                    "SELECT id, student_id, rfid_uid, first_name, last_name, age, grade_level, section, COALESCE(created_at, datetime('now')) as created_at FROM students_cache ORDER BY first_name",
-                    (retryErr, retryRows) => {
-                      if (retryErr) {
-                        console.error(
-                          "Error fetching students after migration:",
-                          retryErr.message,
-                        );
-                        return res
-                          .status(500)
-                          .json({ success: false, error: retryErr.message });
-                      }
-                      res.json({ success: true, students: retryRows || [] });
-                    },
-                  );
-                },
-              );
-            },
-          );
-        } else {
-          console.error("Error fetching students:", err.message);
+// GET: Fetch all students directly from the Clinic API
+app.get("/api/students", async (req, res) => {
+  if (!CLINIC_SOCKET_URL) {
+    return res.status(500).json({ success: false, error: "CLINIC_SOCKET_URL not configured" });
+  }
+
+  try {
+    console.log(`[API] Fetching students from clinic backend...`);
+    // The clinic backend endpoint we created
+    const response = await fetch(`${CLINIC_SOCKET_URL}/api/students/kiosk-get-students`);
+    
+    if (!response.ok) {
+      throw new Error(`Clinic API responded with status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    res.json(data); // Returns { success: true, count: X, data: [...] }
+  } catch (error) {
+    console.error("[API] Error fetching students from clinic backend:", error.message);
+    
+    // Fallback to local cache if offline
+    console.log("[API] Falling back to local students cache...");
+    db.all(
+      "SELECT id, student_id, rfid_uid, first_name, last_name, age, grade_level, section, COALESCE(created_at, datetime('now')) as created_at FROM students_cache ORDER BY first_name",
+      (err, rows) => {
+        if (err) {
           return res.status(500).json({ success: false, error: err.message });
         }
-      } else {
-        res.json({ success: true, students: rows || [] });
+        // Map to match the clinic API structure for seamless frontend integration
+        res.json({ success: true, count: rows.length, data: rows || [] });
       }
-    },
-  );
+    );
+  }
 });
 
 // POST: Register a new student with RFID
-app.post("/api/students/register", (req, res) => {
+app.post("/api/students/register", async (req, res) => {
   const {
     student_id,
     rfid_uid,
@@ -569,99 +547,72 @@ app.post("/api/students/register", (req, res) => {
     });
   }
 
-  // Check if student_id or rfid_uid already exists
-  db.get(
-    "SELECT id FROM students_cache WHERE student_id = ? OR rfid_uid = ?",
-    [student_id, rfid_uid],
-    (err, existingRow) => {
-      if (err) {
-        console.error("Registration check error:", err.message);
-        return res
-          .status(500)
-          .json({ success: false, error: "Database error" });
-      }
+  if (!CLINIC_SOCKET_URL) {
+    return res.status(500).json({ success: false, error: "CLINIC_SOCKET_URL not configured" });
+  }
 
-      if (existingRow) {
-        return res.status(409).json({
-          success: false,
-          error: "Student ID or RFID already registered",
-        });
-      }
+  try {
+    console.log(`[API] Registering student ${first_name} ${last_name} to clinic backend...`);
+    
+    const response = await fetch(`${CLINIC_SOCKET_URL}/api/students/kiosk-register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(req.body)
+    });
 
-      // Insert new student
-      db.run(
-        "INSERT INTO students_cache (student_id, rfid_uid, first_name, last_name, age, grade_level, section) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [
-          student_id,
-          rfid_uid,
-          first_name,
-          last_name,
-          age,
-          grade_level,
-          section,
-        ],
-        function (insertErr) {
-          if (insertErr) {
-            console.error("Error registering student:", insertErr.message);
-            return res
-              .status(500)
-              .json({ success: false, error: "Registration failed" });
-          }
+    const data = await response.json();
 
-          // Fetch and return the newly created student
-          db.get(
-            "SELECT id, student_id, rfid_uid, first_name, last_name, age, grade_level, section, created_at FROM students_cache WHERE id = ?",
-            [this.lastID],
-            (fetchErr, student) => {
-              if (fetchErr) {
-                console.error(
-                  "Error fetching registered student:",
-                  fetchErr.message,
-                );
-                return res.status(500).json({
-                  success: false,
-                  error: "Failed to fetch registered student",
-                });
-              }
+    if (!response.ok) {
+      return res.status(response.status).json(data);
+    }
 
-              // Also add to kiosk_students table for sync tracking
-              db.run(
-                "INSERT INTO kiosk_students (student_id, kiosk_id, rfid_uid, first_name, last_name, age, grade_level, section) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                  student_id,
-                  KIOSK_ID,
-                  rfid_uid,
-                  first_name,
-                  last_name,
-                  age,
-                  grade_level,
-                  section,
-                ],
-                (kioskStudentErr) => {
-                  if (kioskStudentErr) {
-                    console.error(
-                      "Error tracking student in kiosk_students:",
-                      kioskStudentErr.message,
-                    );
-                    // Don't fail if kiosk_students insert fails - main registration succeeded
-                  }
-                },
-              );
+    console.log(`✅ Student registered successfully in clinic backend`);
 
-              console.log(
-                `✅ Student registered: ${first_name} ${last_name} (${student_id})`,
-              );
-              res.status(201).json({
-                success: true,
-                message: "Student registered successfully",
-                student: student,
-              });
-            },
+    // Add to local cache for quick login/offline support after successful cloud registration
+    db.run(
+      "INSERT OR IGNORE INTO students_cache (student_id, rfid_uid, first_name, last_name, age, grade_level, section) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [
+        student_id,
+        rfid_uid,
+        first_name,
+        last_name,
+        age,
+        grade_level,
+        section,
+      ],
+      function (insertErr) {
+        if (insertErr) {
+          console.error("Error caching registered student locally:", insertErr.message);
+        } else {
+          // Also track in kiosk_students
+          db.run(
+            "INSERT OR IGNORE INTO kiosk_students (student_id, kiosk_id, rfid_uid, first_name, last_name, age, grade_level, section, kiosk_registered, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1)",
+            [
+              student_id,
+              KIOSK_ID,
+              rfid_uid,
+              first_name,
+              last_name,
+              age,
+              grade_level,
+              section,
+            ]
           );
-        },
-      );
-    },
-  );
+        }
+      }
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Student registered successfully",
+      student: data.data?.student || req.body,
+    });
+  } catch (error) {
+    console.error("[API] Error registering student to clinic backend:", error.message);
+    res.status(500).json({ success: false, error: "Failed to reach Clinic Server for registration" });
+  }
 });
 
 // PUT: Update student data
