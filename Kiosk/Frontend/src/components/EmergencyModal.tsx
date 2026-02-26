@@ -124,6 +124,7 @@ export function EmergencyModal({ isOpen, onClose, onConfirm }: EmergencyModalPro
     setErrorMessage('');
     setEmergencyRfidUid(null);
     onClose();
+    axios.post(`${API_BASE_URL}/api/esp32/enable-rfid`).catch(console.error);
   };
 
   if (!isOpen) return null;
