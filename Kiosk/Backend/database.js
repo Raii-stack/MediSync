@@ -70,7 +70,21 @@ const migrationError = new Promise((resolve) => {
           }
         }
 
-        if (neededMigrations.length > 0) {
+        // Also check medicines_library compatibility (legacy image_link -> image_url)
+        db.all("PRAGMA table_info(medicines_library)", (medErr, medCols) => {
+          let hasLegacyImageLink = false;
+
+          if (!medErr && medCols) {
+            const medColNames = medCols.map((c) => c.name);
+            hasLegacyImageLink = medColNames.includes("image_link");
+            if (!medColNames.includes("image_url")) {
+              neededMigrations.push(
+                "ALTER TABLE medicines_library ADD COLUMN image_url TEXT;",
+              );
+            }
+          }
+
+          if (neededMigrations.length > 0) {
           console.log(
             `🔄 Running ${neededMigrations.length} schema migrations...`,
           );
@@ -104,16 +118,55 @@ const migrationError = new Promise((resolve) => {
                     } else {
                       console.log("✓ Updated created_at for existing records");
                     }
-                    resolve();
+                    if (hasLegacyImageLink) {
+                      db.run(
+                        "UPDATE medicines_library SET image_url = image_link WHERE (image_url IS NULL OR image_url = '') AND image_link IS NOT NULL AND image_link != ''",
+                        (copyErr) => {
+                          if (copyErr) {
+                            console.log(
+                              "Info: Could not backfill image_url from image_link:",
+                              copyErr.message,
+                            );
+                          } else {
+                            console.log(
+                              "✓ Backfilled medicines_library.image_url from image_link",
+                            );
+                          }
+                          resolve();
+                        },
+                      );
+                    } else {
+                      resolve();
+                    }
                   },
                 );
               }
             });
           });
-        } else {
-          console.log("✓ Schema is up to date");
-          resolve();
-        }
+          } else {
+            console.log("✓ Schema is up to date");
+            if (hasLegacyImageLink) {
+              db.run(
+                "UPDATE medicines_library SET image_url = image_link WHERE (image_url IS NULL OR image_url = '') AND image_link IS NOT NULL AND image_link != ''",
+                (copyErr) => {
+                  if (copyErr) {
+                    console.log(
+                      "Info: Could not backfill image_url from image_link:",
+                      copyErr.message,
+                    );
+                  } else {
+                    console.log(
+                      "✓ Backfilled medicines_library.image_url from image_link",
+                    );
+                  }
+                  resolve();
+                },
+              );
+            } else {
+              resolve();
+            }
+          }
+        });
       });
     });
   });

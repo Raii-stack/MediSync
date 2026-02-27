@@ -4,10 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node init-db.js && node sync.js & node server.js",
-    "dev": "concurrently \"nodemon server.js\" \"nodemon sync.js\"",
+    "start": "node init-db.js && node syncService.js & node server.js",
+    "dev": "concurrently \"nodemon server.js\" \"nodemon syncService.js\"",
     "server": "node server.js",
-    "sync": "node sync.js",
+    "sync": "node syncService.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

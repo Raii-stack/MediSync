@@ -66,7 +66,7 @@ db.run(
     name TEXT UNIQUE NOT NULL,
     description TEXT,
     symptoms_target TEXT,
-    image_link TEXT,
+    image_url TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )
 `,
