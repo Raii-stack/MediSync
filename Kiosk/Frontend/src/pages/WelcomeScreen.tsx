@@ -2,7 +2,7 @@ import { Building2, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router";
 import { KioskLayout } from "../components/KioskLayout";
 import { useSocket } from "../contexts/SocketContext";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { AdminPasswordModal } from "../components/AdminPasswordModal";
 import axios from "axios";
 import { API_BASE_URL } from "../config/api";
@@ -13,6 +13,8 @@ export function WelcomeScreen() {
   const [logoClickCount, setLogoClickCount] = useState(0);
   const [lastClickTime, setLastClickTime] = useState(0);
   const [showAdminModal, setShowAdminModal] = useState(false);
+  const [showUnregisteredModal, setShowUnregisteredModal] = useState(false);
+  const [unregisteredUid, setUnregisteredUid] = useState<string | null>(null);
 
   useEffect(() => {
     sessionStorage.setItem("emergencyModalOpen", "false");
@@ -41,13 +43,14 @@ export function WelcomeScreen() {
           "studentName",
           `${data.student.first_name} ${data.student.last_name}`,
         );
+        // Navigate to vitals screen
+        navigate("/vitals");
       } else {
-        // Guest user
-        sessionStorage.setItem("studentName", "Guest");
+        // Unregistered user
+        setUnregisteredUid(data.uid || null);
+        setShowUnregisteredModal(true);
+        setTimeout(() => setShowUnregisteredModal(false), 5000); // Auto close after 5s
       }
-
-      // Navigate to vitals screen
-      navigate("/vitals");
     };
 
     socket.on("rfid-scan", handleRfidScan);
@@ -163,6 +166,34 @@ export function WelcomeScreen() {
         onClose={() => setShowAdminModal(false)}
         onSuccess={handleAdminSuccess}
       />
+
+      {/* Unregistered User Modal */}
+      {showUnregisteredModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-lg w-full text-center border-2 border-red-500 animate-zoom-in">
+            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+              <span className="text-4xl">⚠️</span>
+            </div>
+            <h2 className="text-3xl font-bold text-gray-800 mb-4">
+              Access Denied
+            </h2>
+            <p className="text-xl text-gray-600 mb-6">
+              This card is not registered in the system. Please proceed to the clinic admin to register.
+            </p>
+            {unregisteredUid && (
+              <p className="text-sm font-mono text-gray-400 mb-8 bg-gray-50 py-2 rounded-xl">
+                UID: {unregisteredUid}
+              </p>
+            )}
+            <button
+              onClick={() => setShowUnregisteredModal(false)}
+              className="w-full py-4 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold text-lg transition-colors shadow-lg"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </KioskLayout>
   );
 }

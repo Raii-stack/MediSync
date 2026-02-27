@@ -66,7 +66,7 @@ db.run(
     name TEXT UNIQUE NOT NULL,
     description TEXT,
     symptoms_target TEXT,
-    image_url TEXT,
+    image_link TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )
 `,
@@ -169,11 +169,6 @@ function checkCompletion() {
     console.log("\n✓ Database initialization complete!");
     console.log(`Database location: ${DB_PATH}`);
 
-    // Seed medicines library first, then slots (to avoid FK constraint)
-    seedMedicinesLibrary(() => {
-      seedKioskSlots();
-    });
-
     // Display schema info
     console.log("\nDatabase schema:");
     tables.forEach((table) => {
@@ -203,108 +198,4 @@ function checkCompletion() {
       });
     }, 1000);
   }
-}
-
-// Seed medicines library
-function seedMedicinesLibrary(callback) {
-  db.get("SELECT COUNT(*) as count FROM medicines_library", (err, row) => {
-    if (!err && row.count === 0) {
-      console.log("\n📚 Seeding medicines library...");
-      const medicines = [
-        {
-          name: "Biogesic",
-          description: "Paracetamol 500mg",
-          symptoms_target: "Fever, Headache, Pain",
-          image_url:
-            "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400&h=400&fit=crop",
-        },
-        {
-          name: "Neozep",
-          description: "Cold and Flu Relief",
-          symptoms_target: "Colds, Rhinitis, Cough",
-          image_url:
-            "https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=400&h=400&fit=crop",
-        },
-        {
-          name: "Buscopan",
-          description: "Antispasmodic 10mg",
-          symptoms_target: "Abdominal Pain, Dysmenorrhea",
-          image_url:
-            "https://images.unsplash.com/photo-1471864190281-a93a3070b6de?w=400&h=400&fit=crop",
-        },
-        {
-          name: "Cetirizine",
-          description: "Antihistamine 10mg",
-          symptoms_target: "Allergies, Rhinitis",
-          image_url:
-            "https://images.unsplash.com/photo-1550572017-4332368c8f1f?w=400&h=400&fit=crop",
-        },
-        {
-          name: "Bioflu",
-          description: "Multi-symptom Cold Relief",
-          symptoms_target: "Flu, Colds",
-          image_url:
-            "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400&h=400&fit=crop",
-        },
-        {
-          name: "Dolo",
-          description: "Paracetamol 500mg",
-          symptoms_target: "Pain, Fever",
-          image_url:
-            "https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=400&h=400&fit=crop",
-        },
-      ];
-
-      const stmt = db.prepare(
-        "INSERT INTO medicines_library (name, description, symptoms_target, image_url) VALUES (?, ?, ?, ?)",
-      );
-
-      medicines.forEach((med) => {
-        stmt.run(med.name, med.description, med.symptoms_target, med.image_url);
-      });
-
-      stmt.finalize((err) => {
-        if (err) {
-          console.error("Error seeding medicines:", err.message);
-        } else {
-          console.log(`✓ Seeded ${medicines.length} medicines`);
-        }
-        if (callback) callback();
-      });
-    } else {
-      if (callback) callback();
-    }
-  });
-}
-
-// Seed kiosk slots with default configuration
-function seedKioskSlots() {
-  db.get("SELECT COUNT(*) as count FROM kiosk_slots", (err, row) => {
-    if (!err && row.count === 0) {
-      console.log("📦 Seeding kiosk slots...");
-      const defaultSlots = [
-        { slot_id: 1, medicine_name: "Biogesic", current_stock: 50 },
-        { slot_id: 2, medicine_name: "Neozep", current_stock: 50 },
-        { slot_id: 3, medicine_name: "Buscopan", current_stock: 30 },
-        { slot_id: 4, medicine_name: "Cetirizine", current_stock: 30 },
-        { slot_id: 5, medicine_name: "Bioflu", current_stock: 30 },
-      ];
-
-      const stmt = db.prepare(
-        "INSERT INTO kiosk_slots (slot_id, medicine_name, current_stock, max_stock) VALUES (?, ?, ?, 50)",
-      );
-
-      defaultSlots.forEach((slot) => {
-        stmt.run(slot.slot_id, slot.medicine_name, slot.current_stock);
-      });
-
-      stmt.finalize((err) => {
-        if (err) {
-          console.error("Error seeding slots:", err.message);
-        } else {
-          console.log(`✓ Seeded ${defaultSlots.length} kiosk slots`);
-        }
-      });
-    }
-  });
 }
