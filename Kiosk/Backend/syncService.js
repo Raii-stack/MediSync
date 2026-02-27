@@ -63,6 +63,16 @@ function dbRun(sql, params = []) {
   });
 }
 
+function normalizeSymptomsTargetForStorage(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 /** Basic cloud connectivity probe. */
 async function isCloudAvailable() {
   if (!_supabase) return false;
@@ -281,7 +291,12 @@ async function pullMedicines() {
        VALUES (?, ?, ?, ?)`,
     );
     data.forEach(m =>
-      stmt.run(m.name, m.description ?? "", m.symptoms_target ?? "", m.image_url ?? ""),
+      stmt.run(
+        m.name,
+        m.description ?? "",
+        normalizeSymptomsTargetForStorage(m.symptoms_target),
+        m.image_url ?? "",
+      ),
     );
     stmt.finalize(err => (err ? reject(err) : resolve()));
   });

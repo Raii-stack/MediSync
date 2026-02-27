@@ -20,6 +20,48 @@ const supabaseKey = process.env.SUPABASE_ANON_KEY;
 const supabase =
   supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
+function symptomsTargetToText(value) {
+  if (value === null || value === undefined) return "";
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      return symptomsTargetToText(parsed);
+    } catch {
+      return trimmed;
+    }
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => symptomsTargetToText(item))
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  if (typeof value === "object") {
+    return Object.values(value)
+      .map((item) => symptomsTargetToText(item))
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  return String(value);
+}
+
+function normalizeSymptomsTargetForStorage(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 async function updateKioskPresence(status, source = "server") {
   const payload = {
     kiosk_id: KIOSK_ID,
@@ -731,7 +773,11 @@ app.get("/api/inventory", (req, res) => {
   `,
     (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
+      const normalizedRows = rows.map((row) => ({
+        ...row,
+        symptoms_target: symptomsTargetToText(row.symptoms_target),
+      }));
+      res.json(normalizedRows);
     },
   );
 });
@@ -743,7 +789,11 @@ app.get("/api/admin/medicines", (req, res) => {
       console.error("Error fetching medicines:", err.message);
       return res.status(500).json({ error: err.message });
     }
-    res.json({ success: true, medicines: rows });
+    const medicines = rows.map((row) => ({
+      ...row,
+      symptoms_target: symptomsTargetToText(row.symptoms_target),
+    }));
+    res.json({ success: true, medicines });
   });
 });
 
@@ -757,7 +807,7 @@ app.post("/api/admin/medicines", (req, res) => {
 
   db.run(
     "INSERT INTO medicines_library (name, description, symptoms_target) VALUES (?, ?, ?)",
-    [name, description || "", symptoms_target || ""],
+    [name, description || "", normalizeSymptomsTargetForStorage(symptoms_target)],
     function (err) {
       if (err) {
         console.error("Error adding medicine:", err.message);
@@ -794,7 +844,11 @@ app.get("/api/admin/slots", (req, res) => {
         console.error("Error fetching slots:", err.message);
         return res.status(500).json({ error: err.message });
       }
-      res.json({ success: true, slots: rows });
+      const slots = rows.map((row) => ({
+        ...row,
+        symptoms_target: symptomsTargetToText(row.symptoms_target),
+      }));
+      res.json({ success: true, slots });
     },
   );
 });
