@@ -73,6 +73,54 @@ function normalizeSymptomsTargetForStorage(value) {
   }
 }
 
+function normalizeSymptomsReported(value) {
+  if (value === null || value === undefined) return [];
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item).trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    if (
+      (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+      (trimmed.startsWith("{") && trimmed.endsWith("}"))
+    ) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((item) => String(item).trim())
+            .filter(Boolean);
+        }
+      } catch {
+      }
+    }
+
+    return trimmed
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [String(value).trim()].filter(Boolean);
+}
+
+function toNullableInteger(value) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toNullableDecimal(value, fractionDigits = 1) {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Number(parsed.toFixed(fractionDigits));
+}
+
 /** Basic cloud connectivity probe. */
 async function isCloudAvailable() {
   if (!_supabase) return false;
@@ -139,29 +187,38 @@ async function pushKioskLogs() {
 
   console.log(`[SYNC-A] Found ${rows.length} unsynced log(s)`);
 
-  const payload = rows.map(r => ({
-    kiosk_id: _kioskId,
-    rfid_uid: r.rfid_uid || null,
-    symptoms_reported: r.symptoms
-      ? r.symptoms.split(",").map(s => s.trim()).filter(Boolean)
-      : [],
-    pain_scale: r.pain_scale ?? null,
-    temp_reading: r.temp_reading ?? null,
-    heart_rate_bpm: r.heart_rate ?? null,
-    medicine_dispensed: r.medicine_dispensed ?? null,
-    created_at: r.created_at,
-  }));
+  let successCount = 0;
+  let failureCount = 0;
 
-  const { error } = await _supabase.from("kiosk_logs").insert(payload);
-  if (error) {
-    console.error("[SYNC-A] ❌ Insert failed:", error.message);
-    return;
+  for (const row of rows) {
+    const payload = {
+      kiosk_id: _kioskId,
+      rfid_uid: row.rfid_uid || row.unregistered_rfid_uid || null,
+      symptoms_reported: normalizeSymptomsReported(row.symptoms),
+      pain_scale: toNullableInteger(row.pain_scale),
+      temp_reading: toNullableDecimal(row.temp_reading, 1),
+      heart_rate_bpm: toNullableInteger(row.heart_rate),
+      medicine_dispensed: row.medicine_dispensed || null,
+      created_at: row.created_at,
+    };
+
+    const { error } = await _supabase.from("kiosk_logs").insert(payload);
+    if (error) {
+      failureCount++;
+      console.error(
+        `[SYNC-A] ❌ Failed log id=${row.id}:`,
+        error.message,
+      );
+      continue;
+    }
+
+    await dbRun("UPDATE kiosk_logs SET synced = 1 WHERE id = ?", [row.id]);
+    successCount++;
   }
 
-  await dbRun(
-    `UPDATE kiosk_logs SET synced = 1 WHERE synced = 0`,
+  console.log(
+    `[SYNC-A] ✅ Synced ${successCount} log(s), failed ${failureCount} log(s)`,
   );
-  console.log(`[SYNC-A] ✅ Pushed and marked ${rows.length} log(s) synced`);
 }
 
 // ─── Step B: PUSH kiosk_slots stock levels ───────────────────────────────────

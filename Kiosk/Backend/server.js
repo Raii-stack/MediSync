@@ -98,9 +98,49 @@ async function updateKioskPresence(status, source = "server") {
 function pushKioskLogToCloud(payload, onSuccess) {
   if (!supabase) return;
 
+  const normalizeSymptoms = (value) => {
+    if (value === null || value === undefined) return [];
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => String(item).trim())
+        .filter(Boolean);
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return [];
+      return trimmed
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    return [String(value).trim()].filter(Boolean);
+  };
+
+  const toNullableInteger = (value) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const toNullableDecimal = (value, fractionDigits = 1) => {
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed)) return null;
+    return Number(parsed.toFixed(fractionDigits));
+  };
+
+  const normalizedPayload = {
+    kiosk_id: payload.kiosk_id || KIOSK_ID,
+    rfid_uid: payload.rfid_uid || payload.unregistered_rfid_uid || null,
+    symptoms_reported: normalizeSymptoms(payload.symptoms_reported),
+    pain_scale: toNullableInteger(payload.pain_scale),
+    temp_reading: toNullableDecimal(payload.temp_reading, 1),
+    heart_rate_bpm: toNullableInteger(payload.heart_rate_bpm),
+    medicine_dispensed: payload.medicine_dispensed || null,
+    created_at: payload.created_at || new Date().toISOString(),
+  };
+
   supabase
     .from("kiosk_logs")
-    .insert([payload])
+    .insert([normalizedPayload])
     .then(({ error }) => {
       if (error) {
         console.error("[CLOUD] Failed to write kiosk log:", error.message);
@@ -108,6 +148,9 @@ function pushKioskLogToCloud(payload, onSuccess) {
       }
 
       if (onSuccess) onSuccess();
+    })
+    .catch((error) => {
+      console.error("[CLOUD] Kiosk log push network error:", error.message);
     });
 }
 
