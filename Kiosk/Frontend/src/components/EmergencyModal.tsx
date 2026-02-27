@@ -23,7 +23,11 @@ export function EmergencyModal({ isOpen, onClose, onConfirm }: EmergencyModalPro
 
   useEffect(() => {
     sessionStorage.setItem("emergencyModalOpen", isOpen ? "true" : "false");
-    
+
+    return () => {
+      sessionStorage.setItem("emergencyModalOpen", "false");
+    };
+
     if (!isOpen) {
       // Reset state when modal closes
       setStep('scan');

@@ -4,6 +4,8 @@ import { KioskLayout } from "../components/KioskLayout";
 import { useSocket } from "../contexts/SocketContext";
 import { useEffect, useState } from "react";
 import { AdminPasswordModal } from "../components/AdminPasswordModal";
+import axios from "axios";
+import { API_BASE_URL } from "../config/api";
 
 export function WelcomeScreen() {
   const navigate = useNavigate();
@@ -11,6 +13,13 @@ export function WelcomeScreen() {
   const [logoClickCount, setLogoClickCount] = useState(0);
   const [lastClickTime, setLastClickTime] = useState(0);
   const [showAdminModal, setShowAdminModal] = useState(false);
+
+  useEffect(() => {
+    sessionStorage.setItem("emergencyModalOpen", "false");
+    axios.post(`${API_BASE_URL}/api/esp32/enable-rfid`).catch((error) => {
+      console.error("Failed to enable RFID on home screen:", error);
+    });
+  }, []);
 
   useEffect(() => {
     if (!socket) return;

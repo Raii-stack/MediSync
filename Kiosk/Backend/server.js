@@ -20,6 +20,39 @@ const supabaseKey = process.env.SUPABASE_ANON_KEY;
 const supabase =
   supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
+async function updateKioskPresence(status, source = "server") {
+  const payload = {
+    kiosk_id: KIOSK_ID,
+    kioskId: KIOSK_ID,
+    status,
+    source,
+    timestamp: new Date().toISOString(),
+  };
+
+  if (supabase) {
+    const { error } = await supabase.from("kiosks").upsert(
+      {
+        kiosk_id: KIOSK_ID,
+        room_assigned: process.env.ROOM_ASSIGNED || "Room TBD",
+        status,
+      },
+      { onConflict: "kiosk_id" },
+    );
+
+    if (error) {
+      console.error(`[PRESENCE] Failed to set ${status}:`, error.message);
+    } else {
+      console.log(`[PRESENCE] Kiosk ${KIOSK_ID} marked ${status}`);
+    }
+  }
+
+  if (clinicSocket && clinicSocket.connected) {
+    clinicSocket.emit("kiosk-status-update", payload);
+    clinicSocket.emit("kiosk-status", payload);
+    console.log(`[PRESENCE] Emitted kiosk status to clinic socket: ${status}`);
+  }
+}
+
 function pushKioskLogToCloud(payload, onSuccess) {
   if (!supabase) return;
 
@@ -96,14 +129,23 @@ if (CLINIC_SOCKET_URL) {
 
   clinicSocket.on("connect", () => {
     console.log(`✅ Connected to clinic app (Socket ID: ${clinicSocket.id})`);
+    updateKioskPresence("Online", "clinic_socket_connect").catch((error) => {
+      console.error("[PRESENCE] Online update failed:", error.message);
+    });
   });
 
   clinicSocket.on("disconnect", () => {
     console.log(`⚠️  Disconnected from clinic app`);
+    updateKioskPresence("Offline", "clinic_socket_disconnect").catch((error) => {
+      console.error("[PRESENCE] Offline update failed:", error.message);
+    });
   });
 
   clinicSocket.on("connect_error", (error) => {
     console.error(`❌ Clinic socket connection error: ${error.message}`);
+    updateKioskPresence("Offline", "clinic_socket_error").catch((updateErr) => {
+      console.error("[PRESENCE] Offline update failed:", updateErr.message);
+    });
   });
 } else {
   console.log(
@@ -1310,10 +1352,35 @@ server.listen(PORT, () => {
   console.log(`🔓 CORS: Allowing all origins`);
   console.log(`🔌 Socket.IO: Available at ws://localhost:${PORT}`);
 
+  updateKioskPresence("Online", "server_start").catch((error) => {
+    console.error("[PRESENCE] Startup online update failed:", error.message);
+  });
+
   // Start edge-to-cloud sync service (shares this process's db + supabase)
   syncService.start(db, supabase, { kioskId: KIOSK_ID });
 });
 
 // Graceful shutdown
-process.on("SIGINT",  () => { syncService.stop(); process.exit(0); });
-process.on("SIGTERM", () => { syncService.stop(); process.exit(0); });
+let shuttingDown = false;
+
+async function handleShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`🛑 ${signal} received. Marking kiosk offline...`);
+
+  try {
+    await updateKioskPresence("Offline", `shutdown_${signal}`);
+  } catch (error) {
+    console.error("[PRESENCE] Shutdown offline update failed:", error.message);
+  }
+
+  syncService.stop();
+  process.exit(0);
+}
+
+process.on("SIGINT", () => {
+  handleShutdown("SIGINT");
+});
+process.on("SIGTERM", () => {
+  handleShutdown("SIGTERM");
+});

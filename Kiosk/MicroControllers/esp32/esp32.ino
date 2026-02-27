@@ -71,7 +71,7 @@ enum ScanState
 };
 ScanState currentState = IDLE;
 
-bool rfidDisabled = false; // Flag to disable RFID when session is active
+bool rfidDisabled = false;
 bool lastEmergencyState = HIGH;
 unsigned long lastEmergencyDebounce = 0;
 unsigned long lastDispenseTime = 0;
