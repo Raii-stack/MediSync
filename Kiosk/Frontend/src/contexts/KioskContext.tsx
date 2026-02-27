@@ -38,7 +38,7 @@ interface KioskContextType {
 
   // Vital Signs
   vitalSigns: VitalSigns | null;
-  setVitalSigns: (vitals: VitalSigns) => void;
+  setVitalSigns: (vitals: VitalSigns | null) => void;
 
   // Symptoms
   selectedSymptoms: string[];
@@ -51,6 +51,7 @@ interface KioskContextType {
   setRecommendedMedicine: (medicine: Medicine | null) => void;
   dispensingSlot: number | null;
   setDispensingSlot: (slot: number | null) => void;
+  resetSessionState: () => void;
 }
 
 const KioskContext = createContext<KioskContextType | undefined>(undefined);
@@ -63,6 +64,14 @@ export function KioskProvider({ children }: { children: ReactNode }) {
   const [recommendedMedicine, setRecommendedMedicine] =
     useState<Medicine | null>(null);
   const [dispensingSlot, setDispensingSlot] = useState<number | null>(null);
+
+  const resetSessionState = () => {
+    setVitalSigns(null);
+    setSelectedSymptoms([]);
+    setPainLevel(5);
+    setRecommendedMedicine(null);
+    setDispensingSlot(null);
+  };
 
   const ensureSlots = (items: SlotConfig[]) => {
     const filled = [...items];
@@ -140,6 +149,7 @@ export function KioskProvider({ children }: { children: ReactNode }) {
         setRecommendedMedicine,
         dispensingSlot,
         setDispensingSlot,
+        resetSessionState,
       }}
     >
       {children}

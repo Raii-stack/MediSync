@@ -86,23 +86,26 @@ export function RecommendationScreen() {
         // Parse symptoms_target and normalize to lowercase
         const targetSymptoms = symptomsTarget
           .split(",")
-          .map((s) => s.trim().toLowerCase());
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean);
 
         console.log(
           `🔍 Checking ${slot.medicine.name}: targets [${targetSymptoms.join(", ")}]`,
         );
 
         // Check if any of the selected symptoms match the medicine's symptoms_target
-        const hasMatch = normalizedSelectedSymptoms.some((selectedSymptom) =>
-          targetSymptoms.some((targetSymptom) => {
-            // Check for exact match or partial match
-            // e.g., "abdominal" matches "abdominal pain" or "abdominal"
-            return (
-              targetSymptom.includes(selectedSymptom) ||
-              selectedSymptom.includes(targetSymptom)
-            );
-          }),
-        );
+        const hasMatch =
+          targetSymptoms.length > 0 &&
+          normalizedSelectedSymptoms.some((selectedSymptom) =>
+            targetSymptoms.some((targetSymptom) => {
+              // Check for exact match or partial match
+              // e.g., "abdominal" matches "abdominal pain" or "abdominal"
+              return (
+                targetSymptom.includes(selectedSymptom) ||
+                selectedSymptom.includes(targetSymptom)
+              );
+            }),
+          );
 
         if (hasMatch) {
           foundMedicine = slot.medicine;
@@ -171,6 +174,7 @@ export function RecommendationScreen() {
         });
 
         if (response.data.success) {
+          sessionStorage.setItem("medicineDispensed", "true");
           // Update local stock
           setSlots(
             slots.map((s) =>
@@ -185,15 +189,24 @@ export function RecommendationScreen() {
 
           toast.success("Medicine dispensed successfully!");
         } else {
+          sessionStorage.setItem("medicineDispensed", "false");
           toast.error(response.data.message || "Dispensing failed");
           setIsDispensing(false);
         }
       } catch (error: any) {
+        sessionStorage.setItem("medicineDispensed", "false");
         console.error("Dispense error:", error);
         toast.error("Failed to dispense medicine");
         setIsDispensing(false);
       }
     }
+  };
+
+  const handleClinicDone = () => {
+    setRecommendedMedicine(null);
+    setDispensingSlot(null);
+    sessionStorage.setItem("medicineDispensed", "false");
+    navigate("/receipt");
   };
 
   const handleDispensingComplete = () => {
@@ -451,7 +464,7 @@ export function RecommendationScreen() {
                       {/* Action Buttons */}
                       <div className="flex flex-col gap-3">
                         <button
-                          onClick={() => navigate("/receipt")}
+                          onClick={handleClinicDone}
                           className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white py-4 rounded-2xl shadow-xl transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 font-bold text-lg"
                         >
                           <Check className="w-5 h-5" />

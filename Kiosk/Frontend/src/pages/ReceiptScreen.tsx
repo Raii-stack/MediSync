@@ -19,9 +19,16 @@ import { API_BASE_URL } from "../config/api";
 export function ReceiptScreen() {
   const navigate = useNavigate();
   const [countdown, setCountdown] = useState(10);
-  const { recommendedMedicine, selectedSymptoms, painLevel, vitalSigns } =
-    useKiosk();
+  const {
+    recommendedMedicine,
+    resetSessionState,
+    selectedSymptoms,
+    painLevel,
+    vitalSigns,
+  } = useKiosk();
   const sessionEndedRef = useRef(false);
+  const medicineDispensed =
+    sessionStorage.getItem("medicineDispensed") === "true";
 
   // Get student info from session storage
   const studentData = sessionStorage.getItem("currentStudent");
@@ -60,8 +67,10 @@ export function ReceiptScreen() {
   }, []);
 
   const handleComplete = useCallback(() => {
+    resetSessionState();
+    sessionStorage.removeItem("medicineDispensed");
     endSession().finally(() => navigate("/"));
-  }, [endSession, navigate]);
+  }, [endSession, navigate, resetSessionState]);
 
   useEffect(() => {
     if (countdown === 0) {
@@ -217,12 +226,16 @@ export function ReceiptScreen() {
                     <div className="flex-1 min-w-0">
                       <div className="text-xs text-gray-600">Dispensed</div>
                       <div className="text-base font-bold text-gray-800 truncate">
-                        {recommendedMedicine?.name || "No medicine"}
+                        {medicineDispensed
+                          ? recommendedMedicine?.name || "Medicine"
+                          : "No medicine dispensed"}
                       </div>
                       <div className="text-xs text-gray-500">
-                        {recommendedMedicine?.dosage ||
-                          recommendedMedicine?.description ||
-                          ""}
+                        {medicineDispensed
+                          ? recommendedMedicine?.dosage ||
+                            recommendedMedicine?.description ||
+                            ""
+                          : "Clinic recommendation / non-dispense flow"}
                       </div>
                     </div>
                   </div>
