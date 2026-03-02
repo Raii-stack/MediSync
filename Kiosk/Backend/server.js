@@ -877,7 +877,8 @@ app.get("/api/admin/slots", (req, res) => {
       ks.last_restocked,
       ml.description,
       ml.symptoms_target,
-      ml.image_url
+      ml.image_url,
+      ml.cooldown_hours
     FROM kiosk_slots ks
     LEFT JOIN medicines_library ml ON ks.medicine_name = ml.name
     ORDER BY ks.slot_id
@@ -1016,13 +1017,17 @@ app.post("/api/dispense", (req, res) => {
 
       // Log transaction
       const timestamp = new Date().toISOString();
+      const localStudentId =
+        student_id && student_id !== "ANON" && student_id !== "GUEST" ? student_id : null;
+
       const stmt = db.prepare(`
         INSERT INTO kiosk_logs 
-        (rfid_uid, symptoms, pain_scale, temp_reading, heart_rate, medicine_dispensed, slot_used, synced, created_at) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+        (student_id, rfid_uid, symptoms, pain_scale, temp_reading, heart_rate, medicine_dispensed, slot_used, synced, created_at) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
       `);
 
       stmt.run(
+        localStudentId,
         rfid_uid || null,
         Array.isArray(symptoms) ? symptoms.join(",") : symptoms || "",
         pain_level || null,
@@ -1087,6 +1092,66 @@ app.post("/api/dispense", (req, res) => {
         timestamp: new Date().toLocaleString(),
       });
     },
+  );
+});
+
+// GET: Check Cooldowns for a Student
+app.get("/api/student/:student_identifier/cooldowns", (req, res) => {
+  const { student_identifier } = req.params;
+  const isRfid = req.query.type === "rfid";
+
+  if (student_identifier === "GUEST") {
+    return res.json({ success: true, cooldowns: {} });
+  }
+
+  // Use the correct column for filtering based on the identifier type
+  // Important: Because unregistered RFIDs log as rfid_uid, we must support both.
+  const filterClause = isRfid ? "l.rfid_uid = ?" : "(l.student_id = ? OR l.rfid_uid = (SELECT rfid_uid FROM students_cache WHERE student_id = ? LIMIT 1))";
+  const params = isRfid ? [student_identifier] : [student_identifier, student_identifier];
+
+  // We fetch ALL medicines and their cooldowns, and join with the most recent log
+  db.all(
+    `
+    SELECT 
+      m.name as medicine, 
+      m.cooldown_hours, 
+      MAX(l.created_at) as last_dispensed 
+    FROM medicines_library m 
+    LEFT JOIN kiosk_logs l ON l.medicine_dispensed = m.name AND ${filterClause}
+    GROUP BY m.name
+    `,
+    params,
+    (err, rows) => {
+      if (err) {
+        console.error("Database error fetching cooldowns:", err.message);
+        return res.status(500).json({ error: "Database error" });
+      }
+
+      const now = new Date();
+      const cooldowns = rows.reduce((acc, row) => {
+        if (!row.last_dispensed || !row.cooldown_hours) {
+          acc[row.medicine] = { onCooldown: false };
+          return acc;
+        }
+
+        const lastTime = new Date(row.last_dispensed);
+        const hoursPassed = (now - lastTime) / (1000 * 60 * 60);
+        const hoursRemaining = row.cooldown_hours - hoursPassed;
+
+        if (hoursRemaining > 0) {
+          acc[row.medicine] = {
+            onCooldown: true,
+            hoursRemaining: Number(hoursRemaining.toFixed(1)),
+            lastDispensed: row.last_dispensed
+          };
+        } else {
+          acc[row.medicine] = { onCooldown: false };
+        }
+        return acc;
+      }, {});
+
+      res.json({ success: true, cooldowns });
+    }
   );
 });
 
@@ -1217,6 +1282,7 @@ app.post("/api/rfid-test/simulate", (req, res) => {
 // POST: Start RFID Hardware Test Mode
 app.post("/api/rfid-test/start", (req, res) => {
   console.log("🧪 RFID_TEST_START received - Enabling hardware test mode");
+  gpioService.setBlue();
   if (hardware.startRfidTest) {
     const result = hardware.startRfidTest();
     return res.json({
@@ -1234,6 +1300,7 @@ app.post("/api/rfid-test/start", (req, res) => {
 // POST: Stop RFID Hardware Test Mode
 app.post("/api/rfid-test/stop", (req, res) => {
   console.log("🧪 RFID_TEST_STOP received - Disabling hardware test mode");
+  gpioService.setIdle();
   if (hardware.stopRfidTest) {
     const result = hardware.stopRfidTest();
     return res.json({
@@ -1343,6 +1410,35 @@ app.post("/api/esp32/blink-heart-led", (req, res) => {
 });
 
 // POST: ESP32 - Stop LED Blinking
+app.post("/api/esp32/stop-blink", (req, res) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+
+  console.log("💡 [ESP32] Stopping LED blink");
+
+  const result = hardware.stopBlinkLED();
+
+  res.json({
+    success: result.success,
+    message: "LED blinking stopped",
+    mode: result.mode,
+  });
+});
+
+// POST: Start Emergency LED Blinking (Red)
+app.post("/api/esp32/emergency-led-start", (req, res) => {
+  console.log("🚨 [GPIO] Starting emergency red led flash");
+  gpioService.startBlinkRed();
+  res.json({ success: true });
+});
+
+// POST: Stop Emergency LED Blinking
+app.post("/api/esp32/emergency-led-stop", (req, res) => {
+  console.log("✅ [GPIO] Stopping emergency red led flash");
+  gpioService.setIdle();
+  res.json({ success: true });
+});
 app.post("/api/esp32/stop-blink", (req, res) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");

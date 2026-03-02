@@ -47,6 +47,7 @@ export function RecommendationScreen() {
     setRecommendedMedicine,
     setDispensingSlot,
     loadSlots,
+    isDemoMode,
   } = useKiosk();
   const [recommendation, setRecommendation] = useState<{
     type: "medicine" | "clinic";
@@ -54,8 +55,36 @@ export function RecommendationScreen() {
     slot?: number;
     reason?: string;
   } | null>(null);
+  const [cooldowns, setCooldowns] = useState<Record<string, { onCooldown: boolean; hoursRemaining?: number; lastDispensed?: string }>>({});
   const [isDispensing, setIsDispensing] = useState(false);
   const [showDispensingModal, setShowDispensingModal] = useState(false);
+
+  // Fetch student cooldowns on mount
+  useEffect(() => {
+    const fetchCooldowns = async () => {
+      try {
+        const studentData = sessionStorage.getItem("currentStudent");
+        const student = studentData ? JSON.parse(studentData) : null;
+        
+        // If guest, no cooldowns apply
+        if (!student) return;
+
+        // Determine best identifier (RFID preferred, fallback to student ID)
+        const identifier = student.rfid_uid || student.student_id;
+        const type = student.rfid_uid ? "rfid" : "id";
+
+        const response = await axios.get(`${API_BASE_URL}/api/student/${identifier}/cooldowns?type=${type}`);
+        if (response.data.success) {
+          console.log("⏳ Loaded Cooldowns:", response.data.cooldowns);
+          setCooldowns(response.data.cooldowns);
+        }
+      } catch (error) {
+        console.error("Failed to load cooldowns:", error);
+      }
+    };
+    
+    fetchCooldowns();
+  }, []);
 
   useEffect(() => {
     // Reload slots to ensure we have latest inventory
@@ -99,10 +128,11 @@ export function RecommendationScreen() {
           normalizedSelectedSymptoms.some((selectedSymptom) =>
             targetSymptoms.some((targetSymptom) => {
               // Check for exact match or partial match
-              // e.g., "abdominal" matches "abdominal pain" or "abdominal"
+              // Improved matching for string variations
               return (
                 targetSymptom.includes(selectedSymptom) ||
-                selectedSymptom.includes(targetSymptom)
+                selectedSymptom.includes(targetSymptom) ||
+                targetSymptom.replace(/s$/, "") === selectedSymptom.replace(/s$/, "")
               );
             }),
           );
@@ -522,26 +552,54 @@ export function RecommendationScreen() {
                         </div>
                       </div>
 
-                      {/* Dosage Info */}
-                      <div className="bg-gray-50 rounded-lg p-3 mb-6">
+                      {/* Dosage Info & Cooldown Warning */}
+                      <div className="bg-gray-50 rounded-lg p-3 mb-6 space-y-2">
                         <p className="text-xs text-gray-600 text-center">
                           <span className="font-semibold">Dosage:</span>{" "}
-                          {recommendation.medicine?.dosage} - Take as directed
+                          {recommendation.medicine?.dosage || "1 tablet"} - Take as directed
                           by healthcare professional
                         </p>
+                        
+                        {recommendation.medicine?.name && !isDemoMode && cooldowns[recommendation.medicine.name]?.onCooldown && (
+                          <div className="bg-orange-100 border border-orange-300 rounded-md p-2 mt-2">
+                            <p className="text-xs text-orange-800 text-center font-bold flex items-center justify-center gap-1">
+                              <AlertCircle className="w-3 h-3" />
+                              COOLDOWN ACTIVE
+                            </p>
+                            <p className="text-xs text-orange-700 text-center mt-1">
+                              You received this medicine recently. Available again in {cooldowns[recommendation.medicine.name].hoursRemaining} hours.
+                            </p>
+                          </div>
+                        )}
+                        {isDemoMode && (
+                          <div className="bg-blue-100 border border-blue-300 rounded-md p-2 mt-2">
+                            <p className="text-xs text-blue-800 text-center font-bold flex items-center justify-center gap-1">
+                              <Activity className="w-3 h-3" />
+                              DEMO MODE ACTIVE
+                            </p>
+                            <p className="text-xs text-blue-700 text-center mt-1">
+                              Cooldown timers are bypassed.
+                            </p>
+                          </div>
+                        )}
                       </div>
 
                       {/* Action Buttons */}
                       <div className="flex flex-col gap-3">
                         <button
                           onClick={handleDispense}
-                          disabled={isDispensing}
+                          disabled={isDispensing || (!isDemoMode && recommendation.medicine?.name ? cooldowns[recommendation.medicine.name]?.onCooldown : false)}
                           className={`bg-gradient-to-r ${theme.buttonGradient} text-white py-4 rounded-2xl shadow-xl transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
                         >
                           {isDispensing ? (
                             <>
                               <Loader2 className="w-5 h-5 animate-spin" />
                               DISPENSING...
+                            </>
+                          ) : (!isDemoMode && recommendation.medicine?.name && cooldowns[recommendation.medicine.name]?.onCooldown) ? (
+                            <>
+                              <Pill className="w-5 h-5" />
+                              ON COOLDOWN
                             </>
                           ) : (
                             <>

@@ -1,8 +1,18 @@
 const sqlite3 = require("sqlite3").verbose();
 const path = require("path");
+const fs = require("fs");
 
 // Connect to a file-based database
+// In production (Docker), DB_PATH should point to /app/data/kiosk.db (the mounted volume)
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, "kiosk.db");
+
+// Ensure the directory for the database file exists
+const dbDir = path.dirname(DB_PATH);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+  console.log(`Created database directory: ${dbDir}`);
+}
+
 const db = new sqlite3.Database(DB_PATH, (err) => {
   if (err) {
     console.error("Error opening database " + err.message);
@@ -70,7 +80,7 @@ const migrationError = new Promise((resolve) => {
           }
         }
 
-        // Also check medicines_library compatibility (legacy image_link -> image_url)
+        // Also check medicines_library compatibility (legacy image_link -> image_url, and cooldown_hours)
         db.all("PRAGMA table_info(medicines_library)", (medErr, medCols) => {
           let hasLegacyImageLink = false;
 
@@ -80,6 +90,11 @@ const migrationError = new Promise((resolve) => {
             if (!medColNames.includes("image_url")) {
               neededMigrations.push(
                 "ALTER TABLE medicines_library ADD COLUMN image_url TEXT;",
+              );
+            }
+            if (!medColNames.includes("cooldown_hours")) {
+              neededMigrations.push(
+                "ALTER TABLE medicines_library ADD COLUMN cooldown_hours INTEGER DEFAULT 0;",
               );
             }
           }

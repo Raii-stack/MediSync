@@ -52,6 +52,10 @@ interface KioskContextType {
   dispensingSlot: number | null;
   setDispensingSlot: (slot: number | null) => void;
   resetSessionState: () => void;
+
+  // Settings
+  isDemoMode: boolean;
+  setIsDemoMode: (isDemoMode: boolean) => void;
 }
 
 const KioskContext = createContext<KioskContextType | undefined>(undefined);
@@ -64,6 +68,15 @@ export function KioskProvider({ children }: { children: ReactNode }) {
   const [recommendedMedicine, setRecommendedMedicine] =
     useState<Medicine | null>(null);
   const [dispensingSlot, setDispensingSlot] = useState<number | null>(null);
+
+  const [isDemoMode, setIsDemoModeState] = useState(() => {
+    return sessionStorage.getItem("isDemoMode") === "true";
+  });
+
+  const setIsDemoMode = (demo: boolean) => {
+    sessionStorage.setItem("isDemoMode", String(demo));
+    setIsDemoModeState(demo);
+  };
 
   const resetSessionState = () => {
     setVitalSigns(null);
@@ -150,6 +163,8 @@ export function KioskProvider({ children }: { children: ReactNode }) {
         dispensingSlot,
         setDispensingSlot,
         resetSessionState,
+        isDemoMode,
+        setIsDemoMode,
       }}
     >
       {children}

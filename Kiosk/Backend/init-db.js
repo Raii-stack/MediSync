@@ -1,8 +1,17 @@
 const sqlite3 = require("sqlite3").verbose();
 const path = require("path");
+const fs = require("fs");
 
 // Database file location (adjust path as needed for your Raspberry Pi setup)
+// In production (Docker), DB_PATH should point to /app/data/kiosk.db (the mounted volume)
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, "kiosk.db");
+
+// Ensure the directory for the database file exists
+const dbDir = path.dirname(DB_PATH);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+  console.log(`Created database directory: ${dbDir}`);
+}
 
 const db = new sqlite3.Database(DB_PATH, (err) => {
   if (err) {
@@ -67,6 +76,7 @@ db.run(
     description TEXT,
     symptoms_target TEXT,
     image_url TEXT,
+    cooldown_hours INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )
 `,

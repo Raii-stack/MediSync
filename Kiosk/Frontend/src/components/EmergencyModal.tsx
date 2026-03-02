@@ -64,6 +64,15 @@ export function EmergencyModal({ isOpen, onClose, onConfirm }: EmergencyModalPro
     };
   }, [socket, isOpen, step]);
 
+  // Manage Emergency LED Blinking State
+  useEffect(() => {
+    if (isOpen && step === 'scan') {
+      axios.post(`${API_BASE_URL}/api/esp32/emergency-led-start`).catch(console.error);
+    } else {
+      axios.post(`${API_BASE_URL}/api/esp32/emergency-led-stop`).catch(console.error);
+    }
+  }, [isOpen, step]);
+
   useEffect(() => {
     if (step !== 'countdown') return;
 

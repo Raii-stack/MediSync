@@ -18,6 +18,10 @@ export function WelcomeScreen() {
 
   useEffect(() => {
     sessionStorage.setItem("emergencyModalOpen", "false");
+    
+    // Reset hardware states on mount to handle browser reloads
+    axios.post(`${API_BASE_URL}/api/scan/stop`).catch(console.error);
+    axios.post(`${API_BASE_URL}/api/session/end`).catch(console.error);
     axios.post(`${API_BASE_URL}/api/esp32/enable-rfid`).catch((error) => {
       console.error("Failed to enable RFID on home screen:", error);
     });
@@ -37,7 +41,7 @@ export function WelcomeScreen() {
       console.log("📡 RFID Scan received:", data);
 
       // Store student data in sessionStorage for use in other screens
-      if (data.student) {
+      if (data.student && data.student.first_name) {
         sessionStorage.setItem("currentStudent", JSON.stringify(data.student));
         sessionStorage.setItem(
           "studentName",
@@ -46,7 +50,10 @@ export function WelcomeScreen() {
         // Navigate to vitals screen
         navigate("/vitals");
       } else {
-        // Unregistered user
+        // Unregistered user - Explicitly block and clear session state
+        sessionStorage.removeItem("currentStudent");
+        sessionStorage.removeItem("studentName");
+        
         setUnregisteredUid(data.uid || null);
         setShowUnregisteredModal(true);
         setTimeout(() => setShowUnregisteredModal(false), 5000); // Auto close after 5s

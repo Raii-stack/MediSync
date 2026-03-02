@@ -344,8 +344,8 @@ async function pullMedicines() {
   await new Promise((resolve, reject) => {
     const stmt = _db.prepare(
       `INSERT OR REPLACE INTO medicines_library
-         (name, description, symptoms_target, image_url)
-       VALUES (?, ?, ?, ?)`,
+         (name, description, symptoms_target, image_url, cooldown_hours)
+       VALUES (?, ?, ?, ?, ?)`,
     );
     data.forEach(m =>
       stmt.run(
@@ -353,6 +353,7 @@ async function pullMedicines() {
         m.description ?? "",
         normalizeSymptomsTargetForStorage(m.symptoms_target),
         m.image_url ?? "",
+        m.cooldown_hours ?? 0
       ),
     );
     stmt.finalize(err => (err ? reject(err) : resolve()));

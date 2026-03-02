@@ -25,6 +25,7 @@ services:
       - ESP32_ENABLED=true
       - SYNC_INTERVAL=${SYNC_INTERVAL:-60}
       - ROOM_ASSIGNED=${ROOM_ASSIGNED:-Room TBD}
+      - DB_PATH=/app/data/kiosk.db
     restart: always
 
   frontend:

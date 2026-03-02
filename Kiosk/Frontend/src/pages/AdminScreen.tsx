@@ -18,6 +18,7 @@ import {
 import { ConfigureSlotModal } from "../components/ConfigureSlotModal";
 import { WiFiSettingsModal } from "../components/WiFiSettingsModal";
 import { RfidTestModal } from "../components/RfidTestModal";
+import { useKiosk } from "../contexts/KioskContext";
 import { toast } from "sonner";
 import { API_BASE_URL } from "../config/api";
 import axios from "axios";
@@ -46,6 +47,8 @@ export function AdminScreen() {
   const [wifiSettingsOpen, setWiFiSettingsOpen] = useState(false);
   const [rfidTestOpen, setRfidTestOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  
+  const { isDemoMode, setIsDemoMode } = useKiosk();
 
   const ensureSlots = (items: SlotConfig[]) => {
     const filled = [...items];
@@ -79,7 +82,9 @@ export function AdminScreen() {
           id: slot.slot_id,
           medicine: slot.medicine_name
             ? {
-                id: slot.medicine_name.toLowerCase().replace(/\s+/g, "-"),
+                // The ID is used for UI keys, so making it url-safe is fine, 
+                // but we keep the exact 'name' for backend queries
+                id: slot.medicine_name.toLowerCase().replace(/[\s()]+/g, "-"),
                 name: slot.medicine_name,
                 dosage: slot.description || "",
                 description: slot.symptoms_target || "",
@@ -247,6 +252,14 @@ export function AdminScreen() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsDemoMode(!isDemoMode)}
+              className={`flex items-center gap-2 px-4 py-2 ${isDemoMode ? "bg-orange-100 text-orange-600 border-2 border-orange-500 shadow-md" : "bg-white text-gray-500 border-2 border-gray-300"} hover:bg-opacity-80 rounded-xl transition-all font-medium shadow-sm`}
+              title="Bypass medication dispense cooldowns"
+            >
+              <ActivitySquare className="w-4 h-4" />
+              Demo Mode
+            </button>
             <button
               onClick={handleRfidTestOpen}
               className="flex items-center gap-2 px-4 py-2 bg-white text-[#4A90E2] hover:bg-gray-50 border-2 border-[#4A90E2] rounded-xl transition-all font-medium shadow-sm"
