@@ -5,7 +5,7 @@ services:
     network_mode: host
     devices:
       - "/dev/ttyS0:/dev/serial0"
-      - "/dev/gpiomem:/dev/gpiomem"
+      - "/dev/gpiochip0:/dev/gpiochip0"
     user: "0"
     privileged: true
     cap_add:
@@ -14,8 +14,6 @@ services:
     volumes:
       - backend-data:/app/data
       - /var/run/dbus/system_bus_socket:/var/run/dbus/system_bus_socket
-      - /sys/class/gpio:/sys/class/gpio
-      - /dev/pi-blaster:/dev/pi-blaster
     env_file:
       - .env
     environment:

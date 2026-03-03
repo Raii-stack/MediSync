@@ -14,8 +14,7 @@ services:
     volumes:
       - backend-data:/app/data
       - /run/dbus:/run/dbus # Required for WiFi management via NetworkManager
-      - /sys/class/gpio:/sys/class/gpio
-      - /dev/pi-blaster:/dev/pi-blaster
+      - /dev/gpiochip0:/dev/gpiochip0
     environment:
       - NODE_ENV=production
       - KIOSK_ID=${KIOSK_ID:-kiosk-001}
