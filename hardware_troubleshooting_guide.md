@@ -49,29 +49,45 @@ You can modify the ESP32 C++ code to lower the threshold for a "valid" reading, 
 The RFID LED connected directly to the Raspberry Pi GPIO pins is not lighting up, and you suspect JavaScript cannot run GPIO pins.
 
 **Why this happens:**
-JavaScript (Node.js) **can** absolutely control Raspberry Pi GPIO pins using libraries like `onoff`, `rpi-gpio`, or `pigpio`. However, based on the [gpioService.js](file:///d:/vscode/MediSync/Kiosk/Backend/gpioService.js) in your backend, your code is likely falling back to a "Mock" because the real hardware library is crashing. 
+JavaScript (Node.js) **can** absolutely control Raspberry Pi GPIO pins using the `gpiod` toolset. However, based on the [gpioService.js](file:///d:/vscode/MediSync/Kiosk/Backend/gpioService.js) in your backend, your code is likely falling back to a "Mock" because the `gpioset` command is not available or the GPIO character device is not accessible inside the container.
 
-Here is why it crashes on the Raspberry Pi:
-1. **Docker Permissions:** You are running the backend inside Docker. By default, Docker containers **do not have access** to the host's physical hardware. If the Node.js app tries to write high/low to the GPIO, Linux blocks it.
-2. **Missing Dependencies:** Libraries like `onoff` or `pigpio` require underlying C-compilers to build on the ARM architecture. If your [Dockerfile](file:///d:/vscode/MediSync/Kiosk/Backend/Dockerfile) doesn't install `build-essential` and `python3`, the library fails to install.
+Here is why it fails on the Raspberry Pi:
+1. **Docker Permissions:** You are running the backend inside Docker. By default, Docker containers **do not have access** to the host's physical hardware. If the Node.js app tries to write to the GPIO, Linux blocks it.
+2. **Missing Dependencies:** The `gpiod` userspace tools must be installed inside the container. Without `gpiod` and `libgpiod-dev`, the `gpioset` command will not be found and the service falls back to Mock Mode.
 
 **The Solution:**
-To make the Javascript GPIO code work inside Docker on the Raspberry Pi, you must expose the hardware memory to the backend container.
+The backend uses `gpiod` (via the `gpioset` command) for LED control. This is the modern, native approach for the 64-bit Raspberry Pi OS kernel and does not require any host daemon.
 
-In your [docker-compose.prod.yml](file:///d:/vscode/MediSync/docker-compose.prod.yml), add `privileged: true` and map the GPIO devices to your backend service:
+**Step 1 — Install gpiod on the Pi host (for testing outside Docker):**
+```bash
+sudo apt-get install gpiod libgpiod-dev
+```
+
+**Step 2 — Verify GPIO access with gpiod:**
+```bash
+# List available GPIO chips
+gpiodetect
+
+# Test toggling pin 23 (Red LED) high and low
+gpioset gpiochip0 23=1
+gpioset gpiochip0 23=0
+```
+
+**Step 3 — Docker configuration:**
+In your [docker-compose.prod.yml](file:///d:/vscode/MediSync/docker-compose.prod.yml), add `privileged: true` and map the GPIO character device to your backend service:
 
 ```yaml
   backend:
-    build: 
+    build:
       context: ./Kiosk/Backend
       dockerfile: Dockerfile.prod
-    privileged: true # <-- ADD THIS
-    devices:         # <-- ADD THIS
-      - "/dev/gpiomem:/dev/gpiomem"
-      - "/dev/mem:/dev/mem"
-Once the container has hardware access, the Node.js script will successfully send signals to the LED.
+    privileged: true
+    volumes:
+      - /dev/gpiochip0:/dev/gpiochip0  # GPIO character device for gpiod
+      - /run/dbus:/run/dbus
+```
 
-Important Note for the Raspberry Pi: To make the LED work, you must have the pi-blaster daemon running on the Raspberry Pi Host OS natively (not inside Docker). You can install it on your Pi by running sudo apt-get install pi-blaster.
+The `gpiod` approach uses the `/dev/gpiochip0` character device (the modern Linux GPIO API) instead of the legacy `/dev/gpiomem` or `/dev/mem` interfaces, and does not require a host-side daemon like `pi-blaster`.
 
 ---
 

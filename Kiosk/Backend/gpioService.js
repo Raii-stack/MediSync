@@ -1,11 +1,21 @@
 const { execSync } = require('child_process');
 
-let piblaster;
+const GPIOCHIP = 'gpiochip0';
+
+let gpiodAvailable = false;
 try {
-  piblaster = require('pi-blaster.js');
+  execSync('which gpioset', { stdio: 'ignore' });
+  gpiodAvailable = true;
 } catch (e) {
-  console.warn("⚠️  'pi-blaster.js' module not found or unsupported. PWM LED control is running in Mock Mode.");
-  piblaster = null;
+  console.warn("⚠️  'gpioset' command not found. GPIO LED control is running in Mock Mode.");
+}
+
+function gpioSet(chip, pin, value) {
+  try {
+    execSync(`gpioset ${chip} ${pin}=${value}`, { stdio: 'ignore' });
+  } catch (e) {
+    console.warn(`[GPIO] Failed to set pin ${pin} to ${value}: ${e.message}`);
+  }
 }
 
 class GPIOService {
@@ -15,11 +25,11 @@ class GPIOService {
     this.RFID_G_PIN = 24;
     this.RFID_B_PIN = 25; // Blue pin
 
-    this.LED_ACTIVE_LOW = false; 
+    this.LED_ACTIVE_LOW = false;
     this.blinkInterval = null;
 
-    if (piblaster) {
-      console.log(`✅ Pi-Blaster PWM Initialized on BCM pins R:${this.RFID_R_PIN}, G:${this.RFID_G_PIN}, B:${this.RFID_B_PIN}`);
+    if (gpiodAvailable) {
+      console.log(`✅ gpiod Initialized on BCM pins R:${this.RFID_R_PIN}, G:${this.RFID_G_PIN}, B:${this.RFID_B_PIN}`);
       this.setIdle(); // Default hardware state
     }
   }
@@ -27,37 +37,31 @@ class GPIOService {
   // --- LED Abstractions ---
 
   /* 
-   * Replicates esp32.ino setColor logic for RPi using soft-PWM (0 to 1 float range).
-   * r: 0-255 (Red intensity)
-   * g: 0-255 (Green intensity)
-   * b: 0-255 (Blue intensity)
+   * Replicates esp32.ino setColor logic for RPi using gpiod digital on/off.
+   * r: 0-255 (Red intensity, treated as on/off threshold)
+   * g: 0-255 (Green intensity, treated as on/off threshold)
+   * b: 0-255 (Blue intensity, treated as on/off threshold)
    */
   setRfidLed(r, g, b = 0) {
-    if (!piblaster) {
-      // console.log(`[GPIO PWM MOCK] RFID LED state -> R: ${r}, G: ${g}, B: ${b}`);
+    if (!gpiodAvailable) {
       return;
     }
 
-    // Sanitize ESP32 0-255 args down to Pi-Blaster 0.0 - 1.0 floats
-    r = Math.max(0, Math.min(255, r));
-    g = Math.max(0, Math.min(255, g));
-    b = Math.max(0, Math.min(255, b));
-
-    let rFloat = r / 255.0;
-    let gFloat = g / 255.0;
-    let bFloat = b / 255.0;
+    // Convert 0-255 values to digital 0/1 for gpiod (any non-zero intensity = LED on)
+    let rVal = r > 0 ? 1 : 0;
+    let gVal = g > 0 ? 1 : 0;
+    let bVal = b > 0 ? 1 : 0;
 
     // Apply Active-Low inversion if required by the hardware wiring
     if (this.LED_ACTIVE_LOW) {
-        // If Active-Low, 1.0 (High) is OFF, 0.0 (Low) is ON.
-        rFloat = 1.0 - rFloat;
-        gFloat = 1.0 - gFloat;
-        bFloat = 1.0 - bFloat;
+      rVal = 1 - rVal;
+      gVal = 1 - gVal;
+      bVal = 1 - bVal;
     }
 
-    piblaster.setPwm(this.RFID_R_PIN, rFloat);
-    piblaster.setPwm(this.RFID_G_PIN, gFloat);
-    piblaster.setPwm(this.RFID_B_PIN, bFloat);
+    gpioSet(GPIOCHIP, this.RFID_R_PIN, rVal);
+    gpioSet(GPIOCHIP, this.RFID_G_PIN, gVal);
+    gpioSet(GPIOCHIP, this.RFID_B_PIN, bVal);
   }
 
   setIdle() {
