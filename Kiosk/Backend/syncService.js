@@ -387,7 +387,7 @@ async function pullSlotConfigurations() {
       `UPDATE kiosk_slots
        SET    medicine_name = ?, max_stock = ?, synced = 1
        WHERE  slot_id = ?`,
-      [slot.medicine_name, slot.max_stock ?? 50, slot.slot_id],
+      [slot.medicine_name, slot.max_stock ?? 15, slot.slot_id],
     );
   }
 

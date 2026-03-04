@@ -53,7 +53,7 @@ create table public.kiosk_inventory (
   slot_id int not null,
   medicine_name text not null,
   current_stock int default 0,
-  max_stock int default 50,
+  max_stock int default 15,
   last_synced timestamp with time zone default now(),
   unique(kiosk_id, slot_id) 
 );

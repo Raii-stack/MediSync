@@ -94,7 +94,7 @@ export function KioskProvider({ children }: { children: ReactNode }) {
           id,
           medicine: null,
           stock: 0,
-          maxStock: 100,
+          maxStock: 15,
           threshold: 5,
         });
       }
@@ -121,7 +121,7 @@ export function KioskProvider({ children }: { children: ReactNode }) {
               }
             : null,
           stock: slot.current_stock || 0,
-          maxStock: slot.max_capacity || 100,
+          maxStock: slot.max_capacity || 15,
           threshold: 5,
         }));
 
@@ -132,10 +132,10 @@ export function KioskProvider({ children }: { children: ReactNode }) {
       // Set default empty slots on error
       setSlots(
         ensureSlots([
-          { id: 1, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
-          { id: 2, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
-          { id: 3, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
-          { id: 4, medicine: null, stock: 0, maxStock: 100, threshold: 5 },
+          { id: 1, medicine: null, stock: 0, maxStock: 15, threshold: 5 },
+          { id: 2, medicine: null, stock: 0, maxStock: 15, threshold: 5 },
+          { id: 3, medicine: null, stock: 0, maxStock: 15, threshold: 5 },
+          { id: 4, medicine: null, stock: 0, maxStock: 15, threshold: 5 },
         ]),
       );
     }

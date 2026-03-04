@@ -1,7 +1,7 @@
 import { Heart, Thermometer, Activity } from "lucide-react";
 import { useNavigate } from "react-router";
 import { KioskLayout } from "../components/KioskLayout";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSocket } from "../contexts/SocketContext";
 import { useKiosk } from "../contexts/KioskContext";
 import axios from "axios";
@@ -11,6 +11,7 @@ import { API_BASE_URL } from "../config/api";
 import { SensorPromptModal } from "../components/SensorPromptModal";
 
 const API_BASE = API_BASE_URL;
+const MAX_SCAN_DURATION_MS = 80_000;
 
 export function VitalSignsScreen() {
   const navigate = useNavigate();
@@ -24,6 +25,10 @@ export function VitalSignsScreen() {
   const [showSensorPrompt, setShowSensorPrompt] = useState(false);
   const [hasReceivedData, setHasReceivedData] = useState(false);
   const [promptTimer, setPromptTimer] = useState<NodeJS.Timeout | null>(null);
+  const hasNavigatedRef = useRef(false);
+  const isScanActiveRef = useRef(false);
+  const bpmSamplesRef = useRef<number[]>([]);
+  const tempSamplesRef = useRef<number[]>([]);
 
   useEffect(() => {
     // Start the vitals scan when component mounts
@@ -32,6 +37,7 @@ export function VitalSignsScreen() {
         console.log("🟢 Starting vitals scan...");
         await axios.post(`${API_BASE}/api/scan/start`);
         setIsScanning(true);
+        isScanActiveRef.current = true;
         setStatusText("Measuring heart rate and temperature...");
       } catch (error) {
         console.error("❌ Error starting scan:", error);
@@ -49,10 +55,59 @@ export function VitalSignsScreen() {
     }, 5000);
     setPromptTimer(timer);
 
+    const maxDurationTimer = setTimeout(async () => {
+      if (hasNavigatedRef.current) return;
+
+      console.log("⏱️ Vitals max duration reached (1:20). Stopping scan and proceeding to symptoms.");
+      setStatusText("Time limit reached. Proceeding...");
+      hasNavigatedRef.current = true;
+      isScanActiveRef.current = false;
+      setIsScanning(false);
+      setShowSensorPrompt(false);
+
+      const bpmSamples = bpmSamplesRef.current;
+      const tempSamples = tempSamplesRef.current;
+      const avgBpm = bpmSamples.length
+        ? Math.round(bpmSamples.reduce((sum, value) => sum + value, 0) / bpmSamples.length)
+        : heartRate;
+      const avgTemp = tempSamples.length
+        ? parseFloat(
+            (tempSamples.reduce((sum, value) => sum + value, 0) / tempSamples.length).toFixed(1),
+          )
+        : temperature;
+
+      if (avgBpm !== null && avgTemp !== null) {
+        setHeartRate(avgBpm);
+        setTemperature(avgTemp);
+        setVitalSigns({
+          heartRate: avgBpm,
+          temperature: avgTemp,
+          oxygenLevel: 98,
+        });
+        sessionStorage.setItem(
+          "vitals",
+          JSON.stringify({
+            bpm: avgBpm,
+            temp: avgTemp,
+          }),
+        );
+      }
+
+      try {
+        await axios.post(`${API_BASE}/api/scan/stop`);
+      } catch (error) {
+        console.error("❌ Error stopping scan after timeout:", error);
+      }
+
+      navigate("/symptoms");
+    }, MAX_SCAN_DURATION_MS);
+
     // Cleanup: stop scan when component unmounts
     return () => {
       if (timer) clearTimeout(timer);
-      if (isScanning) {
+      clearTimeout(maxDurationTimer);
+      if (isScanActiveRef.current) {
+        isScanActiveRef.current = false;
         axios.post(`${API_BASE}/api/scan/stop`).catch(console.error);
       }
     };
@@ -91,10 +146,14 @@ export function VitalSignsScreen() {
 
       // Update heart rate and temperature with real data
       if (data.bpm) {
-        setHeartRate(Math.round(data.bpm));
+        const roundedBpm = Math.round(data.bpm);
+        setHeartRate(roundedBpm);
+        bpmSamplesRef.current.push(roundedBpm);
       }
       if (data.temp) {
-        setTemperature(parseFloat(data.temp.toFixed(1)));
+        const roundedTemp = parseFloat(data.temp.toFixed(1));
+        setTemperature(roundedTemp);
+        tempSamplesRef.current.push(roundedTemp);
       }
 
       // Update progress bar (progress is already 0-100 from backend)
@@ -108,6 +167,8 @@ export function VitalSignsScreen() {
 
     // Listen for scan completion with averaged results
     const handleVitalsComplete = (data: { avg_bpm: number; temp: number }) => {
+      if (hasNavigatedRef.current) return;
+
       console.log("✅ Vitals scan complete:", data);
 
       // Set final averaged values
@@ -137,6 +198,10 @@ export function VitalSignsScreen() {
 
       // Navigate to symptoms screen after a short delay
       setTimeout(() => {
+        if (hasNavigatedRef.current) return;
+        hasNavigatedRef.current = true;
+        isScanActiveRef.current = false;
+        setIsScanning(false);
         navigate("/symptoms");
       }, 1500);
     };

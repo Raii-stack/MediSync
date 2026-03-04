@@ -1,8 +1,9 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../config/api";
 import { EmergencyButton } from "./EmergencyButton";
 import { EmergencyModal } from "./EmergencyModal";
+import { useSocket } from "../contexts/SocketContext";
 
 interface KioskLayoutProps {
   children: ReactNode;
@@ -18,6 +19,24 @@ export function KioskLayout({
   showVersion = false,
 }: KioskLayoutProps) {
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
+  const { socket } = useSocket();
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const openEmergencyModalFromHardware = () => {
+      console.log("🚨 [EMERGENCY] Physical button trigger received - opening modal");
+      setIsEmergencyModalOpen(true);
+    };
+
+    socket.on("physical-emergency-trigger", openEmergencyModalFromHardware);
+    socket.on("emergency-button-pressed", openEmergencyModalFromHardware);
+
+    return () => {
+      socket.off("physical-emergency-trigger", openEmergencyModalFromHardware);
+      socket.off("emergency-button-pressed", openEmergencyModalFromHardware);
+    };
+  }, [socket]);
 
   const handleEmergencyClick = () => {
     setIsEmergencyModalOpen(true);

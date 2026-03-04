@@ -24,10 +24,6 @@ export function EmergencyModal({ isOpen, onClose, onConfirm }: EmergencyModalPro
   useEffect(() => {
     sessionStorage.setItem("emergencyModalOpen", isOpen ? "true" : "false");
 
-    return () => {
-      sessionStorage.setItem("emergencyModalOpen", "false");
-    };
-
     if (!isOpen) {
       // Reset state when modal closes
       setStep('scan');
@@ -42,6 +38,10 @@ export function EmergencyModal({ isOpen, onClose, onConfirm }: EmergencyModalPro
       // Explicitly turn on the RFID reader
       axios.post(`${API_BASE_URL}/api/esp32/enable-rfid`).catch(console.error);
     }
+
+    return () => {
+      sessionStorage.setItem("emergencyModalOpen", "false");
+    };
   }, [isOpen, step]);
 
   useEffect(() => {

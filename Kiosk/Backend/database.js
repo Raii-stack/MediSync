@@ -193,6 +193,17 @@ const migrationError = new Promise((resolve) => {
 migrationError.then(() => {
   console.log("✓ Database ready for queries");
 
+  db.run(
+    "UPDATE kiosk_slots SET max_stock = 15 WHERE max_stock IS NULL OR max_stock != 15",
+    (slotMaxErr) => {
+      if (slotMaxErr) {
+        console.log("Info: Could not normalize kiosk_slots.max_stock:", slotMaxErr.message);
+      } else {
+        console.log("✓ Normalized kiosk_slots.max_stock to 15");
+      }
+    },
+  );
+
   // Note: Tables are created by init-db.js
   // This section only seeds sample data if tables are empty
 

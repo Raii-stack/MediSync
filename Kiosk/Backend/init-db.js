@@ -98,7 +98,7 @@ db.run(
     slot_id INTEGER PRIMARY KEY,
     medicine_name TEXT NOT NULL,
     current_stock INTEGER DEFAULT 0,
-    max_stock INTEGER DEFAULT 50,
+    max_stock INTEGER DEFAULT 15,
     last_restocked DATETIME,
     synced BOOLEAN DEFAULT 0,
     FOREIGN KEY (medicine_name) REFERENCES medicines_library(name)

@@ -550,6 +550,7 @@ hardware.onData((event) => {
     console.log(`🚨 EMERGENCY BUTTON - Physical device triggered, telling UI to open modal`);
     // Emit to local UI to show the Emergency Modal
     io.emit("physical-emergency-trigger");
+    io.emit("emergency-button-pressed");
     return;
   }
 

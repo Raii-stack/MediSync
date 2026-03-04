@@ -610,7 +610,7 @@ export function RecommendationScreen() {
                         </button>
 
                         <button
-                          onClick={() => navigate("/symptoms")}
+                          onClick={() => navigate("/")}
                           disabled={isDispensing}
                           className="bg-white hover:bg-gray-50 text-gray-600 py-3 rounded-xl shadow-md transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 font-semibold border-2 border-gray-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                         >

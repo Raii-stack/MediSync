@@ -13,10 +13,35 @@ import { IdleTimeoutProvider } from "./components/IdleTimeoutProvider";
 // Set to true only when the user lands on the home page via normal navigation.
 let navigatedFromHome = false;
 
-function requireHomeFirst() {
-  if (!navigatedFromHome) {
+function isReloadNavigation() {
+  try {
+    const navEntries = window.performance.getEntriesByType("navigation");
+    if (navEntries.length > 0) {
+      return (navEntries[0] as PerformanceNavigationTiming).type === "reload";
+    }
+
+    const legacyNavigation = window.performance
+      .navigation as PerformanceNavigation | undefined;
+    return legacyNavigation?.type === 1;
+  } catch {
+    return false;
+  }
+}
+
+function requireHomeFirst({ request }: { request: Request }) {
+  const currentPath = new URL(request.url).pathname;
+  const hasFlowSession = sessionStorage.getItem("navigatedFromHome") === "true";
+
+  if (currentPath !== "/" && isReloadNavigation()) {
+    sessionStorage.removeItem("navigatedFromHome");
+    navigatedFromHome = false;
     return redirect("/");
   }
+
+  if (!navigatedFromHome && !hasFlowSession) {
+    return redirect("/");
+  }
+
   return null;
 }
 
@@ -37,6 +62,7 @@ export const router = createBrowserRouter([
         Component: WelcomeScreen,
         loader: () => {
           navigatedFromHome = true;
+          sessionStorage.setItem("navigatedFromHome", "true");
           return null;
         },
       },
