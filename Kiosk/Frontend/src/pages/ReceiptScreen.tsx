@@ -27,6 +27,7 @@ export function ReceiptScreen() {
     vitalSigns,
   } = useKiosk();
   const sessionEndedRef = useRef(false);
+  const sessionCompletedRef = useRef(false);
   const medicineDispensed =
     sessionStorage.getItem("medicineDispensed") === "true";
 
@@ -67,9 +68,18 @@ export function ReceiptScreen() {
   }, []);
 
   const handleComplete = useCallback(() => {
+    if (sessionCompletedRef.current) return;
+    sessionCompletedRef.current = true;
+
     resetSessionState();
+    sessionStorage.removeItem("currentStudent");
+    sessionStorage.removeItem("studentName");
+    sessionStorage.removeItem("vitals");
     sessionStorage.removeItem("medicineDispensed");
-    endSession().finally(() => navigate("/"));
+
+    navigate("/", { replace: true });
+
+    void endSession();
   }, [endSession, navigate, resetSessionState]);
 
   useEffect(() => {
