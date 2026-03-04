@@ -21,6 +21,8 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
   }
 });
 
+db.dbPath = DB_PATH;
+
 // Enable foreign keys
 db.run("PRAGMA foreign_keys = ON");
 

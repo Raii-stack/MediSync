@@ -1,5 +1,7 @@
 const express = require("express");
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
 const { Server } = require("socket.io");
 const { io: ioClient } = require("socket.io-client");
 const cors = require("cors");
@@ -253,6 +255,33 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 app.use(express.json());
+
+app.get("/api/admin/debug/db-path", (req, res) => {
+  const dbPath = db.dbPath || process.env.DB_PATH || path.join(__dirname, "kiosk.db");
+  const dbDir = path.dirname(dbPath);
+
+  let directoryWritable = false;
+  try {
+    fs.accessSync(dbDir, fs.constants.W_OK);
+    directoryWritable = true;
+  } catch {
+    directoryWritable = false;
+  }
+
+  console.log(
+    `[DB-DEBUG] db_path=${dbPath} exists=${fs.existsSync(dbPath)} dir_writable=${directoryWritable}`,
+  );
+
+  res.json({
+    success: true,
+    db_path: dbPath,
+    db_exists: fs.existsSync(dbPath),
+    db_directory: dbDir,
+    db_directory_writable: directoryWritable,
+    node_env: process.env.NODE_ENV || "development",
+    kiosk_id: KIOSK_ID,
+  });
+});
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -901,10 +930,16 @@ app.get("/api/admin/slots", (req, res) => {
 app.post("/api/admin/slots", (req, res) => {
   const { slot_id, medicine_name, current_stock, stock } = req.body;
 
-  if (!slot_id || !medicine_name) {
+  const parsedSlotId = Number.parseInt(slot_id, 10);
+
+  if (!Number.isInteger(parsedSlotId) || parsedSlotId < 1 || parsedSlotId > 5) {
+    return res.status(400).json({ error: "slot_id must be an integer from 1 to 5" });
+  }
+
+  if (!medicine_name) {
     return res
       .status(400)
-      .json({ error: "slot_id and medicine_name required" });
+      .json({ error: "medicine_name required" });
   }
 
   // Accept stock from either "stock" or "current_stock" field
@@ -931,38 +966,47 @@ app.post("/api/admin/slots", (req, res) => {
         }
 
         db.run(
-          "UPDATE kiosk_slots SET medicine_name = ?, current_stock = ?, synced = 0 WHERE slot_id = ?",
-          [medicine_name, stockNum, slot_id],
+          `INSERT INTO kiosk_slots (slot_id, medicine_name, current_stock, synced)
+           VALUES (?, ?, ?, 0)
+           ON CONFLICT(slot_id)
+           DO UPDATE SET medicine_name = excluded.medicine_name,
+                         current_stock = excluded.current_stock,
+                         synced = 0`,
+          [parsedSlotId, medicine_name, stockNum],
           function (err) {
             if (err) {
               console.error("Error updating slot:", err.message);
               return res.status(500).json({ error: err.message });
             }
             console.log(
-              `✅ Updated Slot ${slot_id} to ${medicine_name} (Stock: ${stockNum})`,
+              `✅ Upserted Slot ${parsedSlotId} to ${medicine_name} (Stock: ${stockNum})`,
             );
             res.json({
               success: true,
-              message: `Slot ${slot_id} updated to ${medicine_name} (Stock: ${stockNum})`,
+              message: `Slot ${parsedSlotId} updated to ${medicine_name} (Stock: ${stockNum})`,
             });
           },
         );
       } else {
         // No stock provided — update medicine only, keep existing stock
         db.run(
-          "UPDATE kiosk_slots SET medicine_name = ?, synced = 0 WHERE slot_id = ?",
-          [medicine_name, slot_id],
+          `INSERT INTO kiosk_slots (slot_id, medicine_name, synced)
+           VALUES (?, ?, 0)
+           ON CONFLICT(slot_id)
+           DO UPDATE SET medicine_name = excluded.medicine_name,
+                         synced = 0`,
+          [parsedSlotId, medicine_name],
           function (err) {
             if (err) {
               console.error("Error updating slot:", err.message);
               return res.status(500).json({ error: err.message });
             }
             console.log(
-              `✅ Updated Slot ${slot_id} to ${medicine_name} (Stock: unchanged)`,
+              `✅ Upserted Slot ${parsedSlotId} to ${medicine_name} (Stock: unchanged)`,
             );
             res.json({
               success: true,
-              message: `Slot ${slot_id} updated to ${medicine_name}`,
+              message: `Slot ${parsedSlotId} updated to ${medicine_name}`,
             });
           },
         );
@@ -1473,9 +1517,14 @@ app.post("/api/test-dispense", (req, res) => {
 // --- START SERVER ---
 const PORT = 3001;
 server.listen(PORT, () => {
+  const activeDbPath = db.dbPath || process.env.DB_PATH || path.join(__dirname, "kiosk.db");
+
   console.log(`✅ MediSync Backend running on http://localhost:${PORT}`);
   console.log(`🔓 CORS: Allowing all origins`);
   console.log(`🔌 Socket.IO: Available at ws://localhost:${PORT}`);
+  console.log(
+    `[DB-DEBUG] Using SQLite DB at ${activeDbPath} (exists: ${fs.existsSync(activeDbPath)})`,
+  );
 
   updateKioskPresence("Online", "server_start").catch((error) => {
     console.error("[PRESENCE] Startup online update failed:", error.message);

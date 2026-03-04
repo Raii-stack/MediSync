@@ -19,11 +19,11 @@ export function IdleTimeoutProvider({
   const [showWarning, setShowWarning] = useState(false);
   const [remainingTime, setRemainingTime] = useState(Math.ceil(warningMs / 1000));
 
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Pages where idle timeout should NOT apply
-  const excludedPaths = ["/", "/admin"];
+  const excludedPaths = ["/", "/admin", "/vitals"];
   const isExcluded = excludedPaths.includes(location.pathname);
 
   // Stop tracking if on an excluded path
