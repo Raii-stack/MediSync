@@ -10,7 +10,7 @@ const db = require("./database");
 const hardware = require("./serial");
 const syncService = require("./syncService");
 const wifiService = require("./wifiService");
-const gpioService = require("./gpioService");
+
 
 // Initialize App
 const app = express();
@@ -1202,9 +1202,6 @@ app.post("/api/scan/start", (req, res) => {
   if (hardware.sessionStart) {
     hardware.sessionStart();
   }
-  
-  // Set LED to Scanning Active visual state
-  gpioService.setScanning();
 
   hardware.startScan();
   res.json({ success: true, message: "Scan started" });
@@ -1229,7 +1226,6 @@ app.post("/api/session/end", (req, res) => {
   if (hardware.sessionEnd) {
     hardware.sessionEnd();
   }
-  gpioService.setIdle();
   res.json({ success: true, message: "Session ended" });
 });
 
@@ -1282,7 +1278,6 @@ app.post("/api/rfid-test/simulate", (req, res) => {
 // POST: Start RFID Hardware Test Mode
 app.post("/api/rfid-test/start", (req, res) => {
   console.log("🧪 RFID_TEST_START received - Enabling hardware test mode");
-  gpioService.setBlue();
   if (hardware.startRfidTest) {
     const result = hardware.startRfidTest();
     return res.json({
@@ -1300,7 +1295,6 @@ app.post("/api/rfid-test/start", (req, res) => {
 // POST: Stop RFID Hardware Test Mode
 app.post("/api/rfid-test/stop", (req, res) => {
   console.log("🧪 RFID_TEST_STOP received - Disabling hardware test mode");
-  gpioService.setIdle();
   if (hardware.stopRfidTest) {
     const result = hardware.stopRfidTest();
     return res.json({
@@ -1320,7 +1314,6 @@ app.post("/api/esp32/enable-rfid", (req, res) => {
   console.log("🔓 ENABLE_RFID received - Enabling scanner independently");
   if (hardware.enableRfid) {
     const result = hardware.enableRfid();
-    gpioService.setScanning();
     return res.json({
       success: true,
       message: "RFID scanner enabled",
@@ -1338,7 +1331,6 @@ app.post("/api/esp32/disable-rfid", (req, res) => {
   console.log("🔒 DISABLE_RFID received - Disabling scanner independently");
   if (hardware.disableRfid) {
     const result = hardware.disableRfid();
-    gpioService.setIdle();
     return res.json({
       success: true,
       message: "RFID scanner disabled",
@@ -1429,14 +1421,12 @@ app.post("/api/esp32/stop-blink", (req, res) => {
 // POST: Start Emergency LED Blinking (Red)
 app.post("/api/esp32/emergency-led-start", (req, res) => {
   console.log("🚨 [GPIO] Starting emergency red led flash");
-  gpioService.startBlinkRed();
   res.json({ success: true });
 });
 
 // POST: Stop Emergency LED Blinking
 app.post("/api/esp32/emergency-led-stop", (req, res) => {
   console.log("✅ [GPIO] Stopping emergency red led flash");
-  gpioService.setIdle();
   res.json({ success: true });
 });
 app.post("/api/esp32/stop-blink", (req, res) => {

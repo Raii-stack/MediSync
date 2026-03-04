@@ -17,9 +17,7 @@ RUN apk add --no-cache \
     dbus \
     tini \
     udev \
-    eudev-libs \
-    gpiod \
-    libgpiod-dev
+    eudev-libs 
 
 RUN addgroup node dialout && \
     chown -R node:node /app
