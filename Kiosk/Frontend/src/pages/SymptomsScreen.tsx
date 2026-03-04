@@ -61,18 +61,6 @@ export function SymptomsScreen() {
       color: "from-pink-500 to-rose-500",
     },
     {
-      id: "dehydration",
-      label: "DEHYDRATION",
-      emoji: "💧",
-      color: "from-cyan-500 to-blue-500",
-    },
-    {
-      id: "mild-vomiting",
-      label: "MILD VOMITING",
-      emoji: "🤮",
-      color: "from-green-500 to-emerald-500",
-    },
-    {
       id: "diarrhea",
       label: "DIARRHEA",
       emoji: "🚽",
