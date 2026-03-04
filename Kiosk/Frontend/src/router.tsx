@@ -31,8 +31,9 @@ function isReloadNavigation() {
 function requireHomeFirst({ request }: { request: Request }) {
   const currentPath = new URL(request.url).pathname;
   const hasFlowSession = sessionStorage.getItem("navigatedFromHome") === "true";
+  const isHardLoadToCurrentPath = window.location.pathname === currentPath;
 
-  if (currentPath !== "/" && isReloadNavigation()) {
+  if (currentPath !== "/" && isHardLoadToCurrentPath && isReloadNavigation()) {
     sessionStorage.removeItem("navigatedFromHome");
     navigatedFromHome = false;
     return redirect("/");
