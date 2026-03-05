@@ -303,6 +303,42 @@ module.exports = {
     }
   },
 
+  // Lock emergency button (no alarm)
+  lockEmergency: () => {
+    if (!isSimulationMode && port && port.isOpen) {
+      const command = JSON.stringify({ command: "emergency_lock" });
+      port.write(`${command}\n`);
+      console.log(`📤 Sent to ESP32: ${command}`);
+    } else {
+      console.log("🔴 [SIM] Emergency lock command");
+    }
+    return { success: true };
+  },
+
+  // Start 10-second alarm buzzer
+  soundEmergencyAlarm: () => {
+    if (!isSimulationMode && port && port.isOpen) {
+      const command = JSON.stringify({ command: "emergency_sound_alarm" });
+      port.write(`${command}\n`);
+      console.log(`📤 Sent to ESP32: ${command}`);
+    } else {
+      console.log("🔊 [SIM] Emergency alarm command");
+    }
+    return { success: true };
+  },
+
+  // Unlock emergency button + stop alarm buzzer
+  unlockEmergency: () => {
+    if (!isSimulationMode && port && port.isOpen) {
+      const command = JSON.stringify({ command: "emergency_unlock" });
+      port.write(`${command}\n`);
+      console.log(`📤 Sent to ESP32: ${command}`);
+    } else {
+      console.log("🟢 [SIM] Emergency unlock command (hardware not connected)");
+    }
+    return { success: true };
+  },
+
   // Start/Stop Sensor Scanning
   startScan: () => {
     console.log(

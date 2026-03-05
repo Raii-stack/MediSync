@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
     paths-ignore:
       - 'Kiosk/MicroControllers/esp32/**'
+      - 'Kiosk/MicroControllers/WIRING_DIAGRAM.txt'
 
 jobs:
   build-docker:
@@ -46,6 +47,15 @@ jobs:
           build-args: |
             NODE_ENV=production
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/medisync-frontend:latest
+
+      - name: Build and Push LED Status Service
+        uses: docker/build-push-action@v4
+        with:
+          context: ./Kiosk/MicroControllers/led_service
+          file: ./Kiosk/MicroControllers/led_service/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/medisync-led-status:latest
 
   deploy-to-pi:
     needs: build-docker

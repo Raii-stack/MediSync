@@ -40,12 +40,11 @@ services:
       - .env
     environment:
       - NODE_ENV=production
-      - VITE_API_URL=${VITE_API_URL}
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:3001}
       - VITE_ADMIN_PASSWORD=${VITE_ADMIN_PASSWORD}
 
   led-status:
-    build:
-      context: ./Kiosk/MicroControllers/led_service
+    image: ry4nj/medisync-led-status:latest
     container_name: medisync-led-status
     network_mode: host # shares network with backend (localhost:3001)
     privileged: true # required for RPi GPIO access
@@ -53,9 +52,13 @@ services:
       - "/dev/gpiochip0:/dev/gpiochip0"
     environment:
       - BACKEND_URL=http://localhost:3001
+      # Vitals LED (R + G channels)
       - LED_R_PIN=17
       - LED_G_PIN=27
-      - LED_B_PIN=22
+      # RFID Status LED (R + G + B channels)
+      - RFID_LED_R_PIN=23
+      - RFID_LED_G_PIN=24
+      - RFID_LED_B_PIN=25
     restart: always
     depends_on:
       - backend

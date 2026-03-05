@@ -372,6 +372,11 @@ io.on("connection", (socket) => {
     `✅ Client connected: ${socket.id}${sessionId ? ` (session ${sessionId})` : ""}`,
   );
 
+  // Emit system-reset so the LED service (and any listeners) go back to idle
+  // This handles the case where a page reload connects before the previous
+  // disconnect has been processed, or where the LED was left in a stuck state.
+  io.emit("system-reset");
+
   socket.on("disconnect", (reason) => {
     if (sessionId && activeSessionSockets.get(sessionId) === socket.id) {
       activeSessionSockets.delete(sessionId);
@@ -389,6 +394,12 @@ io.on("connection", (socket) => {
     if (hardware.sessionEnd) {
       hardware.sessionEnd();
     }
+    if (hardware.unlockEmergency) {
+      hardware.unlockEmergency();
+    }
+
+    // Tell the LED service (and any other listeners) to go back to idle
+    io.emit("system-reset");
   });
 });
 
@@ -542,6 +553,8 @@ hardware.onData((event) => {
   if (event.type === "status") {
     if (event.status === "waiting_for_finger") {
       io.emit("sensor-status", { status: "waiting_for_finger" });
+    } else if (event.status === "finger_removed") {
+      io.emit("sensor-status", { status: "finger_removed" });
     }
     return;
   }
@@ -1265,6 +1278,10 @@ app.post("/api/scan/start", (req, res) => {
   }
 
   hardware.startScan();
+
+  // Notify LED service: session active → red
+  io.emit("rfid-led-session");
+
   res.json({ success: true, message: "Scan started" });
 });
 
@@ -1287,6 +1304,10 @@ app.post("/api/session/end", (req, res) => {
   if (hardware.sessionEnd) {
     hardware.sessionEnd();
   }
+
+  // Notify LED service: back to idle → green
+  io.emit("rfid-led-idle");
+
   res.json({ success: true, message: "Session ended" });
 });
 
@@ -1341,6 +1362,10 @@ app.post("/api/rfid-test/start", (req, res) => {
   console.log("🧪 RFID_TEST_START received - Enabling hardware test mode");
   if (hardware.startRfidTest) {
     const result = hardware.startRfidTest();
+
+    // Notify LED service: test mode active → blue
+    io.emit("rfid-led-test");
+
     return res.json({
       success: true,
       message: "RFID test mode enabled",
@@ -1358,6 +1383,10 @@ app.post("/api/rfid-test/stop", (req, res) => {
   console.log("🧪 RFID_TEST_STOP received - Disabling hardware test mode");
   if (hardware.stopRfidTest) {
     const result = hardware.stopRfidTest();
+
+    // Notify LED service: test mode ended → back to idle green
+    io.emit("rfid-led-idle");
+
     return res.json({
       success: true,
       message: "RFID test mode disabled",
@@ -1402,6 +1431,36 @@ app.post("/api/esp32/disable-rfid", (req, res) => {
     success: false,
     message: "Hardware not available",
   });
+});
+
+// POST: Lock physical emergency button (no alarm yet)
+app.post("/api/esp32/emergency-lock", (req, res) => {
+  console.log("🚨 EMERGENCY_LOCK received - Locking button (no alarm)");
+  if (hardware.lockEmergency) {
+    const result = hardware.lockEmergency();
+    return res.json({ success: true, message: "Emergency locked", mode: result.mode });
+  }
+  res.status(500).json({ success: false, message: "Hardware not available" });
+});
+
+// POST: Sound 10s emergency alarm
+app.post("/api/esp32/emergency-alarm", (req, res) => {
+  console.log("🔊 EMERGENCY_ALARM received - Starting 10s buzzer");
+  if (hardware.soundEmergencyAlarm) {
+    const result = hardware.soundEmergencyAlarm();
+    return res.json({ success: true, message: "Emergency alarm started", mode: result.mode });
+  }
+  res.status(500).json({ success: false, message: "Hardware not available" });
+});
+
+// POST: Unlock physical emergency button and stop alarm
+app.post("/api/esp32/emergency-unlock", (req, res) => {
+  console.log("🔓 EMERGENCY_UNLOCK received - Stopping alarm & unlocking button");
+  if (hardware.unlockEmergency) {
+    const result = hardware.unlockEmergency();
+    return res.json({ success: true, message: "Emergency unlocked", mode: result.mode });
+  }
+  res.status(500).json({ success: false, message: "Hardware not available" });
 });
 
 // POST: Emergency Alert

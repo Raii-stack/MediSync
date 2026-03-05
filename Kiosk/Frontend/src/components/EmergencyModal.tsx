@@ -35,12 +35,16 @@ export function EmergencyModal({ isOpen, onClose, onConfirm }: EmergencyModalPro
     }
 
     if (step === 'scan') {
-      // Explicitly turn on the RFID reader
+      // Explicitly turn on the RFID reader and trigger emergency alarm/lock
       axios.post(`${API_BASE_URL}/api/esp32/enable-rfid`).catch(console.error);
+      axios.post(`${API_BASE_URL}/api/esp32/emergency-lock`).catch(console.error);
     }
 
     return () => {
       sessionStorage.setItem("emergencyModalOpen", "false");
+      if (isOpen) {
+        axios.post(`${API_BASE_URL}/api/esp32/emergency-unlock`).catch(console.error);
+      }
     };
   }, [isOpen, step]);
 
@@ -92,6 +96,9 @@ export function EmergencyModal({ isOpen, onClose, onConfirm }: EmergencyModalPro
     setStep('sending');
 
     try {
+      // Sound the hardware alarm explicitly now that the countdown is over
+      axios.post(`${API_BASE_URL}/api/esp32/emergency-alarm`).catch(console.error);
+
       const currentStudent = sessionStorage.getItem('currentStudent');
       const studentData = currentStudent ? JSON.parse(currentStudent) : null;
       const student_id = studentData?.student_id || null;
@@ -137,7 +144,10 @@ export function EmergencyModal({ isOpen, onClose, onConfirm }: EmergencyModalPro
     setErrorMessage('');
     setEmergencyRfidUid(null);
     onClose();
+    
+    // Attempt to re-enable RFID for background reading and unlock emergency hardware
     axios.post(`${API_BASE_URL}/api/esp32/enable-rfid`).catch(console.error);
+    axios.post(`${API_BASE_URL}/api/esp32/emergency-unlock`).catch(console.error);
   };
 
   if (!isOpen) return null;

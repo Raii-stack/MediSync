@@ -56,7 +56,7 @@ TwoWire I2C_Thermal = TwoWire(0);
 TwoWire I2C_Heart = TwoWire(1);
 
 // ==================== VARIABLES ====================
-const byte RATE_SIZE = 4;
+const byte RATE_SIZE = 3;  // 3-sample rolling avg: faster convergence, ±5 BPM tolerance
 byte rates[RATE_SIZE];
 byte rateSpot = 0;
 long lastBeat = 0;
@@ -76,15 +76,18 @@ bool lastEmergencyState = HIGH;
 unsigned long lastEmergencyDebounce = 0;
 unsigned long lastDispenseTime = 0;
 
+// Emergency alarm state (non-blocking)
+bool emergencyLocked = false;          // disables physical button while modal is open
+bool emergencyAlarmActive = false;     // alarm buzzer currently running
+unsigned long emergencyAlarmStart = 0; // millis() when alarm started
+
 // ==================== SETUP ====================
 void setup()
 {
-  // Boot guard: allow strapping pins to settle before driving relays.
   delay(2000);
 
   Serial2.begin(115200, SERIAL_8N1, UART_RX, UART_TX);
 
-  // Adding a small delay to let Serial2 settle
   delay(100);
   Serial2.println("\n--- MEDISYNC KIOSK FIRMWARE ---");
   Serial2.println("System: UART initialized on GPIO 3(RX) & 1(TX)");
@@ -149,6 +152,7 @@ void loop()
 {
   checkEmergencyButton();
   checkCommands();
+  updateEmergencyAlarm(); // non-blocking alarm ticker
 
 #if ENABLE_RFID
   checkRFID();
@@ -280,6 +284,50 @@ void processJSONCommand(String json)
   {
     unlockSolenoid();
   }
+  else if (cmd == "emergency_lock")
+  {
+    // Lock the physical button (no alarm yet)
+    emergencyLocked = true;
+    Serial2.println("{\"event\":\"emergency_locked\"}");
+  }
+  else if (cmd == "emergency_sound_alarm")
+  {
+    // Start 10-second alarm (button should already be locked)
+    emergencyLocked = true;
+    emergencyAlarmActive = true;
+    emergencyAlarmStart = millis();
+    Serial2.println("{\"event\":\"emergency_alarm_started\"}");
+  }
+  else if (cmd == "emergency_unlock")
+  {
+    // Unlock physical button and stop alarm
+    emergencyLocked = false;
+    emergencyAlarmActive = false;
+    noTone(BUZZER_PIN);
+    Serial2.println("{\"event\":\"emergency_unlocked\"}");
+  }
+}
+
+// ==================== EMERGENCY ALARM ====================
+void updateEmergencyAlarm()
+{
+  if (!emergencyAlarmActive) return;
+
+  unsigned long elapsed = millis() - emergencyAlarmStart;
+
+  if (elapsed >= 10000)
+  {
+    // Auto-stop buzzer after 10 seconds (button stays locked until unlock command)
+    noTone(BUZZER_PIN);
+    emergencyAlarmActive = false;
+    return;
+  }
+
+  // Alternating siren: high tone 300ms, low tone 300ms
+  if ((elapsed / 300) % 2 == 0)
+    tone(BUZZER_PIN, 2200);
+  else
+    tone(BUZZER_PIN, 900);
 }
 
 // ==================== SOLENOID LOCK ====================
@@ -298,6 +346,7 @@ void readVitalSigns()
   static unsigned long fingerRemovedTime = 0;
   static bool fingerDetected = false;
   static bool waitingPromptSent = false;
+  static bool fingerRemovedSent = false;
   static bool firstReading = true;
   static int readingCount = 0;
   static float tempSum = 0;
@@ -318,6 +367,7 @@ void readVitalSigns()
     rateSpot = 0;
     particleSensor.clearFIFO();
     waitingPromptSent = false;
+    fingerRemovedSent = false;
   }
 
   long irValue = particleSensor.getIR();
@@ -349,6 +399,13 @@ void readVitalSigns()
     if (fingerRemovedTime == 0)
       fingerRemovedTime = millis();
 
+    // Notify backend once that the finger was removed mid-scan
+    if (!fingerRemovedSent)
+    {
+      sendJson("status", "finger_removed", 0, 0);
+      fingerRemovedSent = true;
+    }
+
     if (millis() - fingerRemovedTime > 2000)
     {
       fingerDetected = false;
@@ -362,10 +419,12 @@ void readVitalSigns()
       lastStreamTime = 0;
       particleSensor.clearFIFO();
       waitingPromptSent = false;
+      fingerRemovedSent = false;
     }
     return;
   }
   fingerRemovedTime = 0;
+  fingerRemovedSent = false; // Reset when finger is back
   waitingPromptSent = false;
 
   float tempC = mlx.readObjectTempC();
@@ -414,7 +473,7 @@ void readVitalSigns()
       sendJson("vitals_progress", curTemp, beatAvg, prog);
   }
 
-  if (heartReadings >= 5)
+  if (heartReadings >= 3)  // 3 beats required: ~2.5s at 70 BPM (was 5 = ~4s)
   {
     float avgTemp = readingCount > 0 ? tempSum / readingCount : 0;
     sendJson("vitals_data", avgTemp, beatAvg, 1.0);
@@ -520,6 +579,9 @@ void sendJson(String event, float temp, int hr, float prog)
 }
 void checkEmergencyButton()
 {
+  // Ignore presses while emergency modal is active
+  if (emergencyLocked) return;
+
   bool state = digitalRead(EMERGENCY_BTN);
   if (state == LOW && lastEmergencyState == HIGH)
   {

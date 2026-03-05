@@ -2,21 +2,27 @@
 """
 MediSync RPi Status LED Service
 ================================
-Connects to the kiosk backend via Socket.IO and drives an RGB LED
-on the Raspberry Pi's GPIO to reflect the current system state.
+Drives TWO RGB LEDs on the Raspberry Pi via GPIO, subscribed to the
+kiosk backend via Socket.IO.
 
-LED States:
-  - Idle / Connected:       Slow green breathing pulse
-  - Waiting for finger:     Solid red
-  - Vitals in progress:     Red → green fade (tracks progress %)
-  - Vitals complete:        Solid green for 2s, then back to idle
-  - Backend disconnected:   Fast red blink
+ ┌──────────────────────────────────────────────────────────────┐
+ │  VITALS LED  (GPIO 17=R, 27=G)                               │
+ │    Idle/connected   → Slow green breathing pulse             │
+ │    Waiting (finger) → Solid red                              │
+ │    Scanning         → Red → green fade (tracks progress %)   │
+ │    Vitals complete  → Solid green 2s, then idle              │
+ │    Disconnected     → Fast red blink                         │
+ ├──────────────────────────────────────────────────────────────┤
+ │  RFID LED    (GPIO 23=R, 24=G, 25=B)                         │
+ │    Idle             → Solid green                            │
+ │    Session active   → Solid red  (scan/start called)         │
+ │    Test mode        → Solid blue (rfid-test/start called)    │
+ └──────────────────────────────────────────────────────────────┘
 
-Wiring (BCM pin numbers, configurable via env vars):
-  LED_R_PIN = 17  (Red channel, via 220Ω resistor)
-  LED_G_PIN = 27  (Green channel, via 220Ω resistor)
-  LED_B_PIN = 22  (Blue channel, not used, for future RGB use)
-  Common Cathode → GND
+Both LEDs reset to idle on page refresh (system-reset event).
+
+Wiring: Common Cathode RGB LEDs, 220Ω resistors on each channel.
+Configure pins via environment variables (see defaults below).
 """
 
 import os
@@ -37,157 +43,238 @@ logging.basicConfig(
 )
 log = logging.getLogger("led_status")
 
-# ── Configuration (override via environment variables) ────────────────────────
-BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:3001")
-LED_R_PIN   = int(os.environ.get("LED_R_PIN", 17))
-LED_G_PIN   = int(os.environ.get("LED_G_PIN", 27))
-LED_B_PIN   = int(os.environ.get("LED_B_PIN", 22))  # reserved, not driven yet
+# ── Configuration ─────────────────────────────────────────────────────────────
+BACKEND_URL      = os.environ.get("BACKEND_URL",     "http://localhost:3001")
+
+# Vitals LED (R + G only — no blue channel needed)
+VITALS_R_PIN     = int(os.environ.get("LED_R_PIN",        17))
+VITALS_G_PIN     = int(os.environ.get("LED_G_PIN",        27))
+
+# RFID Status LED (full R/G/B for green / red / blue states)
+RFID_R_PIN       = int(os.environ.get("RFID_LED_R_PIN",   23))
+RFID_G_PIN       = int(os.environ.get("RFID_LED_G_PIN",   24))
+RFID_B_PIN       = int(os.environ.get("RFID_LED_B_PIN",   25))
 
 # ── GPIO Setup ────────────────────────────────────────────────────────────────
 Device.pin_factory = RPiGPIOFactory()
-led_r = PWMLED(LED_R_PIN)
-led_g = PWMLED(LED_G_PIN)
 
-def set_color(r: float, g: float):
-    """Set RGB LED brightness. r and g are 0.0–1.0 floats."""
-    led_r.value = max(0.0, min(1.0, r))
-    led_g.value = max(0.0, min(1.0, g))
+vitals_r = PWMLED(VITALS_R_PIN)
+vitals_g = PWMLED(VITALS_G_PIN)
 
-def off():
-    set_color(0, 0)
+rfid_r   = PWMLED(RFID_R_PIN)
+rfid_g   = PWMLED(RFID_G_PIN)
+rfid_b   = PWMLED(RFID_B_PIN)
 
-# ── LED State Machine ─────────────────────────────────────────────────────────
-class LEDState:
-    IDLE        = "idle"
-    WAITING     = "waiting_for_finger"
-    SCANNING    = "scanning"
-    COMPLETE    = "complete"
-    DISCONNECTED = "disconnected"
 
-state       = LEDState.DISCONNECTED
-vitals_prog = 0.0          # 0.0 – 1.0
-_lock       = threading.Lock()
-_stop_event = threading.Event()
+def set_vitals_color(r: float, g: float):
+    """Set vitals LED brightness. Values are 0.0–1.0."""
+    vitals_r.value = max(0.0, min(1.0, r))
+    vitals_g.value = max(0.0, min(1.0, g))
 
-def set_state(new_state: str, progress: float = 0.0):
-    global state, vitals_prog
+
+def set_rfid_color(r: float, g: float, b: float):
+    """Set RFID status LED brightness. Values are 0.0–1.0."""
+    rfid_r.value = max(0.0, min(1.0, r))
+    rfid_g.value = max(0.0, min(1.0, g))
+    rfid_b.value = max(0.0, min(1.0, b))
+
+
+def all_off():
+    set_vitals_color(0, 0)
+    set_rfid_color(0, 0, 0)
+
+
+# ── Vitals LED State Machine ──────────────────────────────────────────────────
+class VitalsState:
+    IDLE           = "idle"
+    WAITING        = "waiting_for_finger"
+    FINGER_REMOVED = "finger_removed"   # finger lifted mid-scan — fast red blink
+    SCANNING       = "scanning"
+    COMPLETE       = "complete"
+    DISCONNECTED   = "disconnected"
+
+
+# ── RFID LED State Machine ────────────────────────────────────────────────────
+class RfidState:
+    IDLE    = "idle"     # green
+    SESSION = "session"  # red  — vitals session active
+    TEST    = "test"     # blue — RFID test mode
+
+
+# ── Shared State ──────────────────────────────────────────────────────────────
+vitals_state = VitalsState.DISCONNECTED
+vitals_prog  = 0.0
+rfid_state   = RfidState.IDLE
+_lock        = threading.Lock()
+_stop_event  = threading.Event()
+
+
+def set_vitals_state(new_state: str, progress: float = 0.0):
+    global vitals_state, vitals_prog
     with _lock:
-        state = new_state
-        vitals_prog = progress
+        vitals_state = new_state
+        vitals_prog  = progress
+
+
+def set_rfid_state(new_state: str):
+    global rfid_state
+    with _lock:
+        rfid_state = new_state
+
 
 # ── Animation Thread ──────────────────────────────────────────────────────────
 def animation_loop():
-    """Runs in background thread and continuously updates the LED."""
+    """Runs in background thread; updates both LEDs at ~20 fps."""
     complete_until = 0.0
 
     while not _stop_event.is_set():
         with _lock:
-            current_state = state
+            vs   = vitals_state
             prog = vitals_prog
+            rs   = rfid_state
 
         t = time.time()
 
-        if current_state == LEDState.DISCONNECTED:
-            # Fast red blink (2 Hz)
-            val = 1.0 if (int(t * 2) % 2 == 0) else 0.0
-            set_color(val, 0)
+        # ── Vitals LED ────────────────────────────────────────────────────────
+        if vs == VitalsState.DISCONNECTED:
+            val = 1.0 if (int(t * 2) % 2 == 0) else 0.0  # fast red blink
+            set_vitals_color(val, 0)
 
-        elif current_state == LEDState.IDLE:
-            # Slow green sine-wave breathing (~0.4 Hz)
+        elif vs == VitalsState.IDLE:
             brightness = (math.sin(t * 2 * math.pi * 0.4) + 1) / 2
-            # Scale 0.08–0.6 so it never fully turns off
-            brightness = 0.08 + brightness * 0.52
-            set_color(0, brightness)
+            brightness = 0.08 + brightness * 0.52           # 0.08–0.60
+            set_vitals_color(0, brightness)                  # slow green breathe
 
-        elif current_state == LEDState.WAITING:
-            # Solid red
-            set_color(1.0, 0)
+        elif vs == VitalsState.WAITING:
+            set_vitals_color(1.0, 0)                         # solid red
 
-        elif current_state == LEDState.SCANNING:
-            # Fade from red (progress=0) to green (progress=1)
-            r = 1.0 - prog
-            g = prog
-            set_color(r, g)
+        elif vs == VitalsState.FINGER_REMOVED:
+            # Fast red blink ~3 Hz — urgent: put finger back
+            val = 1.0 if (int(t * 6) % 2 == 0) else 0.0
+            set_vitals_color(val, 0)
 
-        elif current_state == LEDState.COMPLETE:
-            # Solid green for 2 s, then switch back to idle
+        elif vs == VitalsState.SCANNING:
+            set_vitals_color(1.0 - prog, prog)               # red→green fade
+
+        elif vs == VitalsState.COMPLETE:
             if complete_until == 0.0:
                 complete_until = t + 2.0
             if t < complete_until:
-                set_color(0, 1.0)
+                set_vitals_color(0, 1.0)                     # solid green
             else:
                 complete_until = 0.0
-                set_state(LEDState.IDLE)
+                set_vitals_state(VitalsState.IDLE)
 
-        time.sleep(0.05)  # ~20 fps update rate
+        # ── RFID LED ──────────────────────────────────────────────────────────
+        if rs == RfidState.IDLE:
+            set_rfid_color(0, 1.0, 0)        # solid green
 
-    off()
+        elif rs == RfidState.SESSION:
+            set_rfid_color(1.0, 0, 0)        # solid red
+
+        elif rs == RfidState.TEST:
+            # Gentle blue pulse so it's clearly different from solid
+            brightness = (math.sin(t * 2 * math.pi * 1.5) + 1) / 2
+            brightness = 0.3 + brightness * 0.7
+            set_rfid_color(0, 0, brightness)  # pulsing blue
+
+        time.sleep(0.05)
+
+    all_off()
+
 
 # ── Socket.IO Client ──────────────────────────────────────────────────────────
 sio = socketio.Client(
     reconnection=True,
-    reconnection_attempts=0,       # infinite
+    reconnection_attempts=0,
     reconnection_delay=1,
     reconnection_delay_max=10,
     logger=False,
     engineio_logger=False,
 )
 
+# ── Vitals events ─────────────────────────────────────────────────────────────
 @sio.event
 def connect():
     log.info(f"✅ Connected to backend at {BACKEND_URL}")
-    set_state(LEDState.IDLE)
+    set_vitals_state(VitalsState.IDLE)
+    set_rfid_state(RfidState.IDLE)
 
 @sio.event
 def disconnect():
     log.warning("⚠️  Disconnected from backend")
-    set_state(LEDState.DISCONNECTED)
+    set_vitals_state(VitalsState.DISCONNECTED)
+    # Keep RFID LED at last known state; it'll reset on reconnect / system-reset
 
 @sio.event
 def connect_error(data):
     log.error(f"❌ Connection error: {data}")
-    set_state(LEDState.DISCONNECTED)
+    set_vitals_state(VitalsState.DISCONNECTED)
 
-# sensor-status: {"status": "waiting_for_finger"}
 @sio.on("sensor-status")
 def on_sensor_status(data):
     status = data.get("status", "")
     if status == "waiting_for_finger":
-        log.info("🔴 Waiting for finger")
-        set_state(LEDState.WAITING)
+        log.info("🔴 [VITALS] Waiting for finger")
+        set_vitals_state(VitalsState.WAITING)
+    elif status == "finger_removed":
+        log.info("🔴 [VITALS] Finger removed — blinking")
+        set_vitals_state(VitalsState.FINGER_REMOVED)
 
-# vitals-progress: {"bpm": X, "temp": Y, "progress": 0-100}
 @sio.on("vitals-progress")
 def on_vitals_progress(data):
-    raw = data.get("progress", 0)
-    # Backend sends progress as 0-100
+    raw  = data.get("progress", 0)
     prog = max(0.0, min(1.0, raw / 100.0))
-    log.debug(f"📊 Vitals progress: {prog:.0%}")
-    set_state(LEDState.SCANNING, progress=prog)
+    log.debug(f"📊 [VITALS] Progress: {prog:.0%}")
+    # Finger is back on sensor — return to scanning regardless of previous state
+    set_vitals_state(VitalsState.SCANNING, progress=prog)
 
-# vitals-complete: {"avg_bpm": X, "temp": Y}
 @sio.on("vitals-complete")
 def on_vitals_complete(data):
-    log.info("✅ Vitals complete")
-    set_state(LEDState.COMPLETE)
+    log.info("✅ [VITALS] Complete")
+    set_vitals_state(VitalsState.COMPLETE)
+    # Session is done — RFID LED back to idle
+    set_rfid_state(RfidState.IDLE)
 
-# session reset / idle
+# ── RFID events ───────────────────────────────────────────────────────────────
+@sio.on("rfid-led-session")
+def on_rfid_led_session(data=None):
+    log.info("🔴 [RFID LED] Session active")
+    set_rfid_state(RfidState.SESSION)
+
+@sio.on("rfid-led-test")
+def on_rfid_led_test(data=None):
+    log.info("🔵 [RFID LED] Test mode")
+    set_rfid_state(RfidState.TEST)
+
+@sio.on("rfid-led-idle")
+def on_rfid_led_idle(data=None):
+    log.info("🟢 [RFID LED] Idle")
+    set_rfid_state(RfidState.IDLE)
+
+# ── System reset (page refresh / disconnect) ──────────────────────────────────
+@sio.on("system-reset")
+def on_system_reset(data=None):
+    log.info("↩️  System reset — all LEDs to idle")
+    set_vitals_state(VitalsState.IDLE)
+    set_rfid_state(RfidState.IDLE)
+
 @sio.on("rfid-scan")
-def on_rfid_scan(data):
-    # When a new RFID is scanned, reset to idle until vitals start
-    set_state(LEDState.IDLE)
+def on_rfid_scan(data=None):
+    # A new RFID scan means a fresh session start — vitals LED back to idle
+    # (rfid-led-session will follow from scan/start)
+    set_vitals_state(VitalsState.IDLE)
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    log.info(f"🚀 MediSync LED Status Service starting")
-    log.info(f"   Backend : {BACKEND_URL}")
-    log.info(f"   LED pins: R=GPIO{LED_R_PIN}  G=GPIO{LED_G_PIN}  B=GPIO{LED_B_PIN}(unused)")
+    log.info("🚀 MediSync LED Status Service starting")
+    log.info(f"   Backend     : {BACKEND_URL}")
+    log.info(f"   Vitals LED  : R=GPIO{VITALS_R_PIN}  G=GPIO{VITALS_G_PIN}")
+    log.info(f"   RFID LED    : R=GPIO{RFID_R_PIN}  G=GPIO{RFID_G_PIN}  B=GPIO{RFID_B_PIN}")
 
-    # Start animation in background thread
     anim_thread = threading.Thread(target=animation_loop, daemon=True)
     anim_thread.start()
 
-    # Keep reconnecting to backend
     while True:
         try:
             log.info(f"🔗 Connecting to {BACKEND_URL} ...")
@@ -195,8 +282,9 @@ def main():
             sio.wait()
         except Exception as exc:
             log.error(f"Socket error: {exc}")
-            set_state(LEDState.DISCONNECTED)
+            set_vitals_state(VitalsState.DISCONNECTED)
             time.sleep(5)
+
 
 if __name__ == "__main__":
     try:
@@ -204,4 +292,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         log.info("Shutting down LED service")
         _stop_event.set()
-        off()
+        all_off()

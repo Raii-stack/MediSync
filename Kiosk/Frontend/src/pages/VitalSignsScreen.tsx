@@ -11,7 +11,7 @@ import { API_BASE_URL } from "../config/api";
 import { SensorPromptModal } from "../components/SensorPromptModal";
 
 const API_BASE = API_BASE_URL;
-const MAX_SCAN_DURATION_MS = 80_000;
+const MAX_SCAN_DURATION_MS = 60_000; // 1 minute max scan time
 
 export function VitalSignsScreen() {
   const navigate = useNavigate();
@@ -24,7 +24,7 @@ export function VitalSignsScreen() {
   const [isScanning, setIsScanning] = useState(false);
   const [showSensorPrompt, setShowSensorPrompt] = useState(false);
   const [hasReceivedData, setHasReceivedData] = useState(false);
-  const [promptTimer, setPromptTimer] = useState<NodeJS.Timeout | null>(null);
+  const [promptTimer, setPromptTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const hasNavigatedRef = useRef(false);
   const isScanActiveRef = useRef(false);
   const bpmSamplesRef = useRef<number[]>([]);
@@ -58,7 +58,7 @@ export function VitalSignsScreen() {
     const maxDurationTimer = setTimeout(async () => {
       if (hasNavigatedRef.current) return;
 
-      console.log("⏱️ Vitals max duration reached (1:20). Stopping scan and proceeding to symptoms.");
+      console.log("⏱️ Vitals max duration reached (1:00). Stopping scan and proceeding to symptoms.");
       setStatusText("Time limit reached. Proceeding...");
       hasNavigatedRef.current = true;
       isScanActiveRef.current = false;
@@ -210,6 +210,9 @@ export function VitalSignsScreen() {
       if (data.status === "waiting_for_finger") {
         setShowSensorPrompt(true);
         setStatusText("Please place your finger on the sensor");
+      } else if (data.status === "finger_removed") {
+        setShowSensorPrompt(true);
+        setStatusText("Finger removed — please place it back on the sensor");
       }
     };
 
