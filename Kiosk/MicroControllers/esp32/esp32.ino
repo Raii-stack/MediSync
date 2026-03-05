@@ -8,7 +8,6 @@
 
 // ==================== CONFIGURATION ====================
 #define ENABLE_RFID true
-#define LED_ACTIVE_LOW false
 
 // ==================== PIN MAP ====================
 // I2C Buses
@@ -23,24 +22,25 @@
 MFRC522 rfid(RFID_SS_PIN, RFID_RST_PIN);
 unsigned long lastRfidRead = 0;
 
-// Output Devices
+// Output Devices - Medicine Slots
 #define SLOT1_RELAY 33
 #define SLOT2_RELAY 32
 #define SLOT3_RELAY 25
 #define SLOT4_RELAY 12
-#define SLOT5_RELAY 14
-#define BUZZER_PIN 15
 
 // Relay logic (true = active-low, false = active-high)
 #define SLOT1_ACTIVE_LOW true
 #define SLOT2_ACTIVE_LOW true
 #define SLOT3_ACTIVE_LOW true
 #define SLOT4_ACTIVE_LOW true
-#define SLOT5_ACTIVE_LOW true
 
-// Heartbeat Progress LED
-#define HEART_R 2
-#define HEART_G 0
+// Solenoid Door Lock (replaces Slot 5 relay)
+#define SOLENOID_PIN 14
+#define SOLENOID_ACTIVE_LOW true
+#define SOLENOID_UNLOCK_MS 10000
+
+// Buzzer
+#define BUZZER_PIN 15
 
 // Input
 #define EMERGENCY_BTN 16
@@ -89,7 +89,7 @@ void setup()
   Serial2.println("\n--- MEDISYNC KIOSK FIRMWARE ---");
   Serial2.println("System: UART initialized on GPIO 3(RX) & 1(TX)");
 
-  // Relays
+  // Relays - Medicine Slots
   pinMode(SLOT1_RELAY, OUTPUT);
   setRelay(SLOT1_RELAY, SLOT1_ACTIVE_LOW, false);
   pinMode(SLOT2_RELAY, OUTPUT);
@@ -99,11 +99,9 @@ void setup()
   pinMode(SLOT4_RELAY, OUTPUT);
   setRelay(SLOT4_RELAY, SLOT4_ACTIVE_LOW, false);
 
-  pinMode(SLOT5_RELAY, OUTPUT);
-  setRelay(SLOT5_RELAY, SLOT5_ACTIVE_LOW, false);
-  
-  pinMode(HEART_R, OUTPUT);
-  pinMode(HEART_G, OUTPUT);
+  // Solenoid lock - ensure locked on boot
+  pinMode(SOLENOID_PIN, OUTPUT);
+  setRelay(SOLENOID_PIN, SOLENOID_ACTIVE_LOW, false);
 
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
@@ -128,6 +126,8 @@ void setup()
   }
 
   // Heart Sensor Init
+  // NOTE: Pulse amplitude raised to 0x3F (~12.5 mA) for better signal-to-noise ratio.
+  // If finger detection feels too sensitive or IR values saturate, lower to 0x1F.
   I2C_Heart.begin(HEART_SDA, HEART_SCL, 400000);
   if (!particleSensor.begin(I2C_Heart, I2C_SPEED_FAST))
   {
@@ -137,11 +137,10 @@ void setup()
   {
     Serial2.println("OK: Heart Sensor Ready");
     particleSensor.setup(60, 4, 2, 100, 411, 4096);
-    particleSensor.setPulseAmplitudeRed(0x0A);
+    particleSensor.setPulseAmplitudeRed(0x3F); // Raised from 0x0A for improved accuracy
     particleSensor.setPulseAmplitudeGreen(0);
   }
 
-  setHeartLed(0, 255);
   playSuccessTone();
 }
 
@@ -242,13 +241,11 @@ void processJSONCommand(String json)
     if (cmd == "start_vitals")
     {
       currentState = READING_VITALS;
-      setHeartLed(255, 0);
     }
   }
   else if (cmd == "session_end" || cmd == "reset")
   {
     rfidDisabled = false; // Re-enable RFID when session ends
-    setHeartLed(0, 255); // Back to idle (green)
     currentState = IDLE;
   }
   else if (cmd == "rfid_test_start")
@@ -279,9 +276,23 @@ void processJSONCommand(String json)
   {
     dispense(doc["slot"]);
   }
+  else if (cmd == "unlock_solenoid")
+  {
+    unlockSolenoid();
+  }
 }
 
-// ==================== VITALS & PROGRESS LED ====================
+// ==================== SOLENOID LOCK ====================
+void unlockSolenoid()
+{
+  Serial2.println("{\"event\":\"solenoid_unlocking\"}");
+  setRelay(SOLENOID_PIN, SOLENOID_ACTIVE_LOW, true);  // Unlock (relay ON)
+  delay(SOLENOID_UNLOCK_MS);                           // Hold open for 10 seconds
+  setRelay(SOLENOID_PIN, SOLENOID_ACTIVE_LOW, false);  // Lock again
+  Serial2.println("{\"event\":\"solenoid_locked\"}");
+}
+
+// ==================== VITALS ====================
 void readVitalSigns()
 {
   static unsigned long fingerRemovedTime = 0;
@@ -319,9 +330,6 @@ void readVitalSigns()
 
   if (!fingerDetected)
   {
-    // Red while waiting for finger (keep solid red, minimal blinking)
-    setHeartLed(255, 0);
-
     if (!waitingPromptSent)
     {
       sendJson("status", "waiting_for_finger", 0, 0);
@@ -340,12 +348,6 @@ void readVitalSigns()
   {
     if (fingerRemovedTime == 0)
       fingerRemovedTime = millis();
-
-    // Pulse red when finger removed (blink red~)
-    if ((millis() / 300) % 2 == 0)
-      setHeartLed(255, 0); // Bright red
-    else
-      setHeartLed(100, 0); // Dimmer red
 
     if (millis() - fingerRemovedTime > 2000)
     {
@@ -399,9 +401,7 @@ void readVitalSigns()
       heartReadings++;
 
       float prog = min((float)heartReadings / 5.0f, 1.0f);
-      int rProg = 255 * (1.0 - prog);
-      int gProg = 255 * prog;
-      setHeartLed(rProg, gProg);
+      sendJson("vitals_progress", 0, beatAvg, prog);
     }
   }
 
@@ -427,16 +427,13 @@ void finishVitals(bool success)
 {
   if (success)
   {
-    setHeartLed(0, 255); // Green for success
     playCompleteTone();
   }
   else
   {
-    setHeartLed(255, 0); // Red for failure
     playErrorTone();
   }
   delay(1500);
-  setHeartLed(0, 255); // Back to idle green
   currentState = IDLE;
 }
 
@@ -469,34 +466,15 @@ void dispense(int slot)
     pin = SLOT4_RELAY;
     activeLow = SLOT4_ACTIVE_LOW;
   }
-  else if (slot == 5)
-  {
-    pin = SLOT5_RELAY;
-    activeLow = SLOT5_ACTIVE_LOW;
-  }
+  // Slot 5 is reserved for the solenoid lock - not dispensable
 
   if (pin != -1)
   {
     playDispensingTone();
 
-    if (slot == 4)
-    {
-      setRelay(SLOT4_RELAY, activeLow, true);
-      delay(2500);
-      setRelay(SLOT4_RELAY, activeLow, false);
-    }
-    else if (slot == 5)
-    {
-      setRelay(SLOT5_RELAY, activeLow, true);
-      delay(2500);
-      setRelay(SLOT5_RELAY, activeLow, false);
-    }
-    else
-    {
-      setRelay(pin, activeLow, true);
-      delay(2000);
-      setRelay(pin, activeLow, false);
-    }
+    setRelay(pin, activeLow, true);
+    delay(slot == 4 ? 2500 : 2000);
+    setRelay(pin, activeLow, false);
 
     StaticJsonDocument<200> doc;
     doc["event"] = "dispense_complete";
@@ -508,29 +486,6 @@ void dispense(int slot)
 }
 
 // ==================== HELPERS ====================
-void setColor(int rPin, int gPin, int r, int g)
-{
-  // Normalize values 0-255
-  r = constrain(r, 0, 255);
-  g = constrain(g, 0, 255);
-
-  // Use digitalWrite for zero values to guarantee the pin is fully off.
-  // analogWrite(pin, 0) on the ESP32 can leave a residual signal that
-  // causes both LEDs to glow simultaneously.
-  if (LED_ACTIVE_LOW)
-  {
-    if (r == 0) digitalWrite(rPin, HIGH); else analogWrite(rPin, 255 - r);
-    if (g == 0) digitalWrite(gPin, HIGH); else analogWrite(gPin, 255 - g);
-  }
-  else
-  {
-    if (r == 0) digitalWrite(rPin, LOW); else analogWrite(rPin, r);
-    if (g == 0) digitalWrite(gPin, LOW); else analogWrite(gPin, g);
-  }
-}
-
-void setHeartLed(int r, int g) { setColor(HEART_R, HEART_G, r, g); }
-
 void setRelay(int pin, bool activeLow, bool on)
 {
   if (activeLow)

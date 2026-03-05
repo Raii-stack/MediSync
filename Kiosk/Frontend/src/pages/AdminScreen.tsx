@@ -10,7 +10,7 @@ import {
   TestTube2,
   Settings,
   Wifi,
-  WifiOff,
+  DoorOpen,
   Lock,
   RefreshCw,
   Scan,
@@ -47,6 +47,7 @@ export function AdminScreen() {
   const [wifiSettingsOpen, setWiFiSettingsOpen] = useState(false);
   const [rfidTestOpen, setRfidTestOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isUnlocking, setIsUnlocking] = useState(false);
   
   const { isDemoMode, setIsDemoMode } = useKiosk();
 
@@ -233,6 +234,28 @@ export function AdminScreen() {
     setRfidTestOpen(false);
   };
 
+  const handleUnlockSolenoid = async () => {
+    if (isUnlocking) return;
+    setIsUnlocking(true);
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/admin/unlock-solenoid`);
+      if (response.data.success) {
+        toast.success("🔓 Door unlocked for 10 seconds");
+      } else {
+        toast.error(response.data.message || "Failed to unlock door");
+        setIsUnlocking(false);
+        return;
+      }
+    } catch (error) {
+      console.error("Solenoid unlock error:", error);
+      toast.error("Failed to send unlock command");
+      setIsUnlocking(false);
+      return;
+    }
+    // Keep button disabled for 10 seconds (while solenoid is active)
+    setTimeout(() => setIsUnlocking(false), 10000);
+  };
+
   return (
     <div className="h-screen w-screen bg-gradient-to-br from-gray-50 to-blue-50 flex flex-col overflow-hidden">
       {/* Header */}
@@ -259,6 +282,23 @@ export function AdminScreen() {
             >
               <ActivitySquare className="w-4 h-4" />
               Demo Mode
+            </button>
+            <button
+              onClick={handleUnlockSolenoid}
+              disabled={isUnlocking}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-medium shadow-sm border-2 ${
+                isUnlocking
+                  ? "bg-amber-50 text-amber-400 border-amber-200 cursor-not-allowed"
+                  : "bg-white text-amber-600 border-amber-400 hover:bg-amber-50"
+              }`}
+              title="Unlock solenoid door lock for 10 seconds"
+            >
+              {isUnlocking ? (
+                <Lock className="w-4 h-4 animate-pulse" />
+              ) : (
+                <DoorOpen className="w-4 h-4" />
+              )}
+              {isUnlocking ? "Unlocking... (10s)" : "Unlock Door"}
             </button>
             <button
               onClick={handleRfidTestOpen}
@@ -408,14 +448,16 @@ export function AdminScreen() {
                           disabled={
                             testingSlot === slot.id ||
                             slot.stock === 0 ||
-                            !slot.medicine
+                            !slot.medicine ||
+                            slot.id === 5 // Slot 5 relay is reserved for solenoid lock
                           }
                           className="flex items-center justify-center gap-2 px-4 py-3 bg-blue-50 hover:bg-blue-100 text-[#4A90E2] rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed border-2 border-blue-200"
+                          title={slot.id === 5 ? "Slot 5 relay is reserved for the solenoid door lock" : undefined}
                         >
                           <TestTube2
                             className={`w-4 h-4 ${testingSlot === slot.id ? "animate-pulse" : ""}`}
                           />
-                          {testingSlot === slot.id ? "Testing..." : "Test"}
+                          {testingSlot === slot.id ? "Testing..." : slot.id === 5 ? "Reserved" : "Test"}
                         </button>
                         <button
                           disabled={!slot.medicine}

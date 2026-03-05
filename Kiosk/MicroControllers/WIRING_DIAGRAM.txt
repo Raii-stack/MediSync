@@ -85,15 +85,16 @@ Bus 1 (Wire1): GPIO 18 (SDA), GPIO 19 (SCL) → MAX30102 (3.3V device)
 Note: These buses are separated to avoid voltage conflicts between 5V and 3.3V I2C devices.
 
 
-RELAY WIRING (Medicine Dispensing):
+RELAY WIRING (Medicine Dispensing + Solenoid Lock):
 ====================================
 
-Each relay controls one medicine slot:
+Each relay controls one medicine slot or the solenoid lock:
 
 Relay 1 (GPIO 33) → Medicine Slot 1
 Relay 2 (GPIO 32) → Medicine Slot 2
 Relay 3 (GPIO 25) → Medicine Slot 3
-Relay 4 (GPIO 26) → Medicine Slot 4
+Relay 4 (GPIO 12) → Medicine Slot 4
+Relay 5 (GPIO 14) → Solenoid Door Lock (10-second timed unlock)
 
 Relay Module Terminals:
   COM   → Power source (+) for solenoid/motor
@@ -103,21 +104,36 @@ Relay Module Terminals:
 
 Active LOW: GPIO HIGH = Relay OFF, GPIO LOW = Relay ON
 
+Solenoid Lock Notes:
+  - ESP32 sends `{"command":"unlock_solenoid"}` to activate for 10 seconds
+  - Triggered via Admin Panel "Unlock Door" button
+  - Use a 12V solenoid bolt lock wired through relay COM/NO on GPIO 14
 
-RGB LED WIRING (Common Cathode):
-=================================
+RGB LED WIRING (Status LED moved to Raspberry Pi — see below):
+===============================================================
 
-Progress LED:
-  R → GPIO 12 (via 220Ω resistor)
-  G → GPIO 13 (via 220Ω resistor)
-  B → GPIO 14 (via 220Ω resistor)
-  Cathode → GND
+The RGB status LED is no longer wired to the ESP32.
+It is driven by the Raspberry Pi via the medisync-led-status Docker service.
 
-Status LED:
-  R → GPIO 27 (via 220Ω resistor)
-  G → GPIO 26 (via 220Ω resistor)
-  B → GPIO 25 (via 220Ω resistor)
-  Cathode → GND
+See: Kiosk/MicroControllers/led_service/led_status.py
+
+
+RASPBERRY PI STATUS LED WIRING:
+================================
+
+LED Type: Common Cathode RGB LED
+
+  R → RPi BCM GPIO 17 (via 220Ω resistor)  [configurable: LED_R_PIN]
+  G → RPi BCM GPIO 27 (via 220Ω resistor)  [configurable: LED_G_PIN]
+  B → RPi BCM GPIO 22 (via 220Ω resistor)  [configurable: LED_B_PIN, not currently driven]
+  Common Cathode → GND (Pi physical pin 9 or any GND)
+
+LED States:
+  🟢 Slow breathing green  = System idle, backend connected
+  🔴 Solid red             = Waiting for finger on heart rate sensor
+  🔴→🟢 Fade               = Vitals scan in progress (red=0% → green=100%)
+  🟢 Solid green (2s)      = Vitals reading complete
+  🔴 Fast blink            = Backend disconnected
 
 
 BREADBOARD LAYOUT SUGGESTION:

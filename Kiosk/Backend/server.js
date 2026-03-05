@@ -855,7 +855,23 @@ app.get("/api/inventory", (req, res) => {
   );
 });
 
+// --- ADMIN API: Unlock solenoid door lock for 10 seconds ---
+app.post("/api/admin/unlock-solenoid", (req, res) => {
+  console.log("[ADMIN] 🔓 Solenoid unlock requested");
+  const result = hardware.unlockSolenoid();
+  if (result && result.success) {
+    res.json({
+      success: true,
+      message: "Solenoid unlock command sent. Door will unlock for 10 seconds.",
+      mode: result.mode,
+    });
+  } else {
+    res.status(500).json({ success: false, message: "Failed to send unlock command" });
+  }
+});
+
 // --- ADMIN API: Get all medicines ---
+
 app.get("/api/admin/medicines", (req, res) => {
   db.all("SELECT * FROM medicines_library ORDER BY name", (err, rows) => {
     if (err) {

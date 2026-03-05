@@ -43,6 +43,23 @@ services:
       - VITE_API_URL=${VITE_API_URL}
       - VITE_ADMIN_PASSWORD=${VITE_ADMIN_PASSWORD}
 
+  led-status:
+    build:
+      context: ./Kiosk/MicroControllers/led_service
+    container_name: medisync-led-status
+    network_mode: host # shares network with backend (localhost:3001)
+    privileged: true # required for RPi GPIO access
+    devices:
+      - "/dev/gpiochip0:/dev/gpiochip0"
+    environment:
+      - BACKEND_URL=http://localhost:3001
+      - LED_R_PIN=17
+      - LED_G_PIN=27
+      - LED_B_PIN=22
+    restart: always
+    depends_on:
+      - backend
+
 networks:
   medisync-network:
     driver: bridge

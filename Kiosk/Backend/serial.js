@@ -290,6 +290,19 @@ module.exports = {
     }
   },
 
+  // Unlock solenoid door lock for 10 seconds
+  unlockSolenoid: () => {
+    if (!isSimulationMode && port && port.isOpen) {
+      const command = JSON.stringify({ command: "unlock_solenoid" });
+      port.write(`${command}\n`);
+      console.log(`📤 Sent to ESP32: ${command}`);
+      return { success: true, mode: "real_hardware" };
+    } else {
+      console.log("🔓 [SIM] Solenoid unlock command (hardware not connected)");
+      return { success: true, mode: "simulation" };
+    }
+  },
+
   // Start/Stop Sensor Scanning
   startScan: () => {
     console.log(
