@@ -16,18 +16,23 @@ adb start-server
 while true; do
     # Check if a device is connected and authorized
     if adb devices | grep -q "\<device\>"; then
-        # Check if ports are already forwarded by looking for tcp:80 in reverse list
-        if ! adb reverse --list | grep -q "tcp:80"; then
+        # Check if ports are already forwarded by looking for tcp:8080 in reverse list
+        if ! adb reverse --list | grep -q "tcp:8080"; then
             echo "[$(date)] Tablet detected. Setting up port forwarding..."
-            
-            # Forward Frontend (80) and Backend (3001)
-            adb reverse tcp:80 tcp:80
+
+            # Forward Frontend: tablet's localhost:8080 -> Pi's localhost:80
+            # (port 80 is privileged; using 8080 on the tablet side avoids permission errors)
+            adb reverse tcp:8080 tcp:80
+            STATUS_80=$?
+
+            # Forward Backend: tablet's localhost:3001 -> Pi's localhost:3001
             adb reverse tcp:3001 tcp:3001
-            
-            if [ $? -eq 0 ]; then
-                echo "[$(date)] ✅ Ports successfully forwarded (80, 3001)."
+            STATUS_3001=$?
+
+            if [ $STATUS_80 -eq 0 ] && [ $STATUS_3001 -eq 0 ]; then
+                echo "[$(date)] ✅ Ports successfully forwarded (8080→80, 3001→3001)."
             else
-                echo "[$(date)] ❌ Failed to forward ports."
+                echo "[$(date)] ❌ Failed to forward one or more ports (frontend exit: $STATUS_80, backend exit: $STATUS_3001)."
             fi
         fi
     else
