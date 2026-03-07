@@ -1,4 +1,4 @@
-# connecting the Tablet via USB
+# Connecting the Tablet via USB
 
 This guide explains how to connect the Kiosk's Android tablet to the Raspberry Pi via a USB cable instead of Wi-Fi. This is highly recommended as it provides a much more stable and faster connection between the frontend UI and the backend/hardware.
 
@@ -6,7 +6,9 @@ We use **ADB (Android Debug Bridge) Reverse Port Forwarding** to achieve this.
 
 ## Overview
 
-When the tablet is connected via USB, it does not automatically get a network connection to the Pi. By using ADB, we can explicitly tell the tablet to route any traffic sent to its own `localhost:80` down the USB cable directly to the Raspberry Pi's `localhost:80`.
+When the tablet is connected via USB, it does not automatically get a network connection to the Pi. By using ADB, we can explicitly tell the tablet to route any traffic sent to its own `localhost:8080` down the USB cable directly to the Raspberry Pi's `localhost:80`.
+
+> **Why port 8080 and not 80?** Port 80 is a privileged port on Linux and can only be bound by root. Since the ADB service runs as a non-root user, we map the tablet's `localhost:8080` → Pi's `localhost:80` to avoid a `Permission denied` error.
 
 ## 1. Prepare the Tablet
 
@@ -34,8 +36,8 @@ Because tablets can be unplugged or restarted, we provide an automated backgroun
 4. **WATCH THE TABLET SCREEN.** The first time this service detects the tablet, the tablet will pop up a dialog box asking: **"Allow USB debugging?"**.
 5. Check the box that says **"Always allow from this computer"** and tap **OK**.
 6. The background service will now automatically intercept the tablet's ports:
-   - `tcp:80` (Frontend)
-   - `tcp:3001` (Backend)
+   - `tcp:8080` → `tcp:80` (Frontend)
+   - `tcp:3001` → `tcp:3001` (Backend)
 
 > **Note:** Because this runs as a system service, it starts automatically every time the Raspberry Pi turns on. If the USB cable is unplugged and plugged back in, the service recovers without any action from you.
 
@@ -43,7 +45,7 @@ Because tablets can be unplugged or restarted, we provide an automated backgroun
 
 Because the USB cable is now routing traffic natively:
 1. Open the kiosk browser on the tablet (e.g., Fully Kiosk Browser or Chrome).
-2. Set the Start URL to simply: `http://localhost`
+2. Set the Start URL to: `http://localhost:8080`
 3. Update your `.env` file on the Raspberry Pi so the frontend hits the mapped USB port:
    ```env
    VITE_API_URL=http://localhost:3001
@@ -59,4 +61,5 @@ If the connection stops working:
    ```
 2. Verify the USB cable hasn't come loose on either end.
 3. Ensure USB Debugging is still enabled on the tablet.
+4. Confirm the Start URL in your kiosk browser is set to `http://localhost:8080` (not `http://localhost`).
 
