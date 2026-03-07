@@ -46,9 +46,11 @@ active_high = not IS_COMMON_ANODE
 
 vitals_r = PWMLED(VITALS_R_PIN, active_high=active_high)
 vitals_g = PWMLED(VITALS_G_PIN, active_high=active_high)
-rfid_r   = PWMLED(RFID_R_PIN, active_high=active_high)
-rfid_g   = PWMLED(RFID_G_PIN, active_high=active_high)
-rfid_b   = PWMLED(RFID_B_PIN, active_high=active_high)
+
+# RFID SMD5050 LEDs are specifically wired as Active Low (ground activation)
+rfid_r   = PWMLED(RFID_R_PIN, active_high=not active_high)
+rfid_g   = PWMLED(RFID_G_PIN, active_high=not active_high)
+rfid_b   = PWMLED(RFID_B_PIN, active_high=not active_high)
 
 class VitalsState:
     IDLE           = "idle"

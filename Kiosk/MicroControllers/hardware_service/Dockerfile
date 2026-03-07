@@ -17,8 +17,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the service script
+# Copy the service scripts
 COPY hardware_controller.py .
+COPY max30102.py .
 
 # Default environment (override in docker-compose)
 ENV BACKEND_URL=http://localhost:3001
