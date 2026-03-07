@@ -23,7 +23,7 @@ export function IdleTimeoutProvider({
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Pages where idle timeout should NOT apply
-  const excludedPaths = ["/", "/admin", "/vitals"];
+  const excludedPaths = ["/", "/admin"];
   const isExcluded = excludedPaths.includes(location.pathname);
 
   // Stop tracking if on an excluded path

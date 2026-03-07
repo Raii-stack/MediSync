@@ -281,15 +281,18 @@ def heartbeat_loop():
         if ir_value < 50000:
             log.debug(f"🔻 [DEBUG] IR below threshold: ir_value={ir_value} < 50000 → no finger")
             if finger_detected:
+                log.warning("🔴 [DEBUG] Finger REMOVED during scan! Resetting timer.")
                 if not finger_removed_sent:
                     sio.emit("pi-sensor-status", {"status": "finger_removed"})
-                    log.info("🔴 [DEBUG] Finger REMOVED — emitted pi-sensor-status{finger_removed}")
+                    # Emit a 0 progress to reset frontend
+                    sio.emit("pi-vitals-progress", {"bpm": 0, "temp": 0, "progress": 0})
                     finger_removed_sent = True
                 # Reset timer and readings when finger lifted
                 heart_readings = 0
                 rates.clear()
                 temps.clear()
                 finger_placed_at = 0.0
+                null_read_count = 0
             else:
                 if not waiting_prompt_sent:
                     sio.emit("pi-sensor-status", {"status": "waiting_for_finger"})
