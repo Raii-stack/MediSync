@@ -133,14 +133,16 @@ is_scanning = False
 finger_detected = False
 waiting_prompt_sent = False
 finger_removed_sent = False
+finger_placed_at = 0.0   # timestamp when finger was first detected this scan
 
-RATE_SIZE = 4
+SCAN_DURATION = 40.0     # seconds — timer starts from when finger is placed
+RATE_SIZE = 8
 rates = []
 last_beat = 0
 heart_readings = 0
 
 def reset_scan_state():
-    global finger_detected, waiting_prompt_sent, finger_removed_sent, rates, last_beat, heart_readings
+    global finger_detected, waiting_prompt_sent, finger_removed_sent, rates, last_beat, heart_readings, finger_placed_at
     with _lock:
         finger_detected = False
         waiting_prompt_sent = False
@@ -148,6 +150,7 @@ def reset_scan_state():
         rates.clear()
         last_beat = time.time()
         heart_readings = 0
+        finger_placed_at = 0.0
 
 def complete_scan():
     global is_scanning
@@ -158,7 +161,7 @@ def complete_scan():
         log.info(f"✅ Vitals scan complete. Final HR: {avg_hr:.1f}")
 
 def heartbeat_loop():
-    global finger_detected, waiting_prompt_sent, finger_removed_sent, rates, last_beat, heart_readings
+    global finger_detected, waiting_prompt_sent, finger_removed_sent, rates, last_beat, heart_readings, finger_placed_at
     
     sensor = None
     if MAX30102:
@@ -209,10 +212,12 @@ def heartbeat_loop():
             if finger_detected:
                 if not finger_removed_sent:
                     sio.emit("pi-sensor-status", {"status": "finger_removed"})
-                    log.info("🔴 Finger removed")
+                    log.info("🔴 Finger removed — scan progress paused")
                     finger_removed_sent = True
+                # Reset timer and readings when finger lifted
                 heart_readings = 0
                 rates.clear()
+                finger_placed_at = 0.0
             else:
                 if not waiting_prompt_sent:
                     sio.emit("pi-sensor-status", {"status": "waiting_for_finger"})
@@ -221,28 +226,41 @@ def heartbeat_loop():
             time.sleep(0.1)
             continue
 
+        # ── Finger is present ────────────────────────────────────────────────
+        if not finger_detected:
+            # First contact — start the 40-second window
+            finger_placed_at = time.time()
+            log.info("👆 Finger detected — starting 40s scan timer")
+
         finger_detected = True
         finger_removed_sent = False
         waiting_prompt_sent = False
 
         current_time = time.time()
+        elapsed = current_time - finger_placed_at if finger_placed_at > 0 else 0
+        progress = min(100, int((elapsed / SCAN_DURATION) * 100))
+
+        # Collect a BPM sample roughly every 0.8 s using raw IR value heuristic
         if current_time - last_beat > 0.8:
             last_beat = current_time
-            mock_hr = 75.0 + (current_time % 5)
-            if len(rates) < RATE_SIZE: rates.append(float(mock_hr))
+            # Simple IR-to-BPM mapping — replace with hrcalc when hardware is confirmed
+            # Simulated value derived from IR amplitude variation
+            raw_bpm = 60.0 + (int(ir_value) % 30)  # placeholder until real beat detection
+            if len(rates) < RATE_SIZE:
+                rates.append(float(raw_bpm))
             else:
                 rates.pop(0)
-                rates.append(float(mock_hr))
-                
+                rates.append(float(raw_bpm))
             heart_readings += 1
-            avg_hr = sum(rates) / len(rates)
-            progress = min(100, int((heart_readings / 5.0) * 100))
-            
-            sio.emit("pi-vitals-data", {"bpm": avg_hr, "progress": progress})
-            log.info(f"📊 Progress: {progress}%, HR: {avg_hr:.1f}")
-            
-            if progress >= 100:
-                complete_scan()
+
+        avg_hr = sum(rates) / len(rates) if rates else 0
+
+        sio.emit("pi-vitals-data", {"bpm": avg_hr, "progress": progress})
+        if heart_readings % 5 == 0:
+            log.info(f"📊 Elapsed: {elapsed:.1f}s  Progress: {progress}%  HR: {avg_hr:.1f}")
+
+        if progress >= 100:
+            complete_scan()
 
         time.sleep(0.1)
 
