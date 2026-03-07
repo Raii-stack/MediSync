@@ -24,7 +24,7 @@ except ImportError:
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [HARDWARE] %(levelname)s %(message)s",
     datefmt="%H:%M:%S",
 )
@@ -41,10 +41,12 @@ RFID_R_PIN   = int(os.environ.get("RFID_LED_R_PIN", 23))
 RFID_G_PIN   = int(os.environ.get("RFID_LED_G_PIN", 24))
 RFID_B_PIN   = int(os.environ.get("RFID_LED_B_PIN", 25))
 
-IS_COMMON_ANODE = os.environ.get("LED_COMMON_ANODE", "false").lower() == "true"
-active_high = not IS_COMMON_ANODE  # True for common cathode (GPIO HIGH = LED ON)
+# SMD5050 Common Anode LEDs: active_high=False so value=1.0 → pin LOW → LED ON.
+# Set LED_COMMON_ANODE=false in env only if you are using common cathode LEDs.
+IS_COMMON_ANODE = os.environ.get("LED_COMMON_ANODE", "true").lower() == "true"
+active_high = not IS_COMMON_ANODE  # False for common anode (pin LOW = LED ON)
 
-# Common Cathode LEDs — active_high=True so value=1.0 → GPIO HIGH → LED ON
+# Common Anode LEDs — active_high=False so gpiozero inverts: value=1.0 → pin LOW → LED ON
 vitals_r = PWMLED(VITALS_R_PIN, active_high=active_high)
 vitals_g = PWMLED(VITALS_G_PIN, active_high=active_high)
 rfid_r   = PWMLED(RFID_R_PIN, active_high=active_high)
@@ -89,11 +91,21 @@ def set_states(vs=None, vp=None, rs=None):
 
 def led_animation_loop():
     complete_until = 0.0
+    prev_vs = None
+    prev_rs = None
     while not _stop_event.is_set():
         with _lock:
             vs = vitals_state
             prog = vitals_prog
             rs = rfid_state
+
+        # Log state changes (once per transition, not every frame)
+        if vs != prev_vs:
+            log.info(f"🔆 [LED] Vitals state: {prev_vs} → {vs} (prog={prog:.0%})")
+            prev_vs = vs
+        if rs != prev_rs:
+            log.info(f"🔆 [LED] RFID state: {prev_rs} → {rs}")
+            prev_rs = rs
 
         t = time.time()
         
@@ -167,10 +179,11 @@ def heartbeat_loop():
     if MAX30102:
         MAX_RETRIES = 5
         RETRY_DELAY = 3  # seconds
+        log.info(f"🔧 [DEBUG] MAX30102 module found, attempting init (up to {MAX_RETRIES} tries)...")
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 sensor = MAX30102()
-                log.info("MAX30102 initialized successfully.")
+                log.info("✅ [DEBUG] MAX30102 initialized successfully on I2C bus.")
                 break
             except Exception as e:
                 log.warning(f"MAX30102 init attempt {attempt}/{MAX_RETRIES} failed: {e}")
@@ -178,18 +191,27 @@ def heartbeat_loop():
                     log.info(f"Retrying in {RETRY_DELAY}s...")
                     time.sleep(RETRY_DELAY)
                 else:
-                    log.error("MAX30102 could not be initialized after all retries. Falling back to simulation.")
+                    log.error("❌ [DEBUG] MAX30102 could not be initialized after all retries. Falling back to simulation.")
                     sensor = None
     else:
-        log.warning("max30102 module missing. Running in simulation.")
+        log.warning("⚠️  [DEBUG] max30102 module missing. Running in SIMULATION mode.")
 
+    log.info(f"🔧 [DEBUG] Heartbeat loop started. sensor={'REAL' if sensor else 'SIMULATION'}, is_scanning={is_scanning}")
+
+    loop_count = 0
     while not _stop_event.is_set():
         with _lock:
             scanning = is_scanning
 
         if not scanning:
+            # Log idle state every 10 seconds so we know the loop is alive
+            loop_count += 1
+            if loop_count % 20 == 0:  # every ~10s at 0.5s sleep
+                log.debug(f"💤 [DEBUG] Heartbeat loop idle — waiting for start-vitals-scan event (is_scanning=False)")
             time.sleep(0.5)
             continue
+
+        loop_count = 0  # reset idle counter when scanning
 
         if sensor:
             try:
@@ -198,23 +220,27 @@ def heartbeat_loop():
                     time.sleep(0.02)  # FIFO empty, wait for next sample
                     continue
                 ir_value = ir
+                log.debug(f"📡 [DEBUG] Sensor read: red={red}, ir={ir_value}")
             except Exception as e:
-                log.error(f"Sensor read error: {e}")
+                log.error(f"❌ [DEBUG] Sensor read error: {e}")
                 ir_value = 0
                 time.sleep(0.5)
         else:
             # Simulation mode: always provide a finger-present signal unless
             # we are simulating a 'waiting for finger' pause.
             if not finger_detected and waiting_prompt_sent:
+                log.debug("[DEBUG] Simulation: waiting 2s before simulating finger placed...")
                 # Simulate brief absence then place finger
                 time.sleep(2)
             ir_value = 60000  # Simulated finger-present IR value
+            log.debug(f"🧪 [DEBUG] Simulation: ir_value={ir_value}")
 
         if ir_value < 50000:
+            log.debug(f"🔻 [DEBUG] IR below threshold: ir_value={ir_value} < 50000 → no finger")
             if finger_detected:
                 if not finger_removed_sent:
                     sio.emit("pi-sensor-status", {"status": "finger_removed"})
-                    log.info("🔴 Finger removed — scan progress paused")
+                    log.info("🔴 [DEBUG] Finger REMOVED — emitted pi-sensor-status{finger_removed}")
                     finger_removed_sent = True
                 # Reset timer and readings when finger lifted
                 heart_readings = 0
@@ -223,6 +249,7 @@ def heartbeat_loop():
             else:
                 if not waiting_prompt_sent:
                     sio.emit("pi-sensor-status", {"status": "waiting_for_finger"})
+                    log.info("🟡 [DEBUG] No finger yet — emitted pi-sensor-status{waiting_for_finger}")
                     waiting_prompt_sent = True
             finger_detected = False
             time.sleep(0.1)
@@ -232,7 +259,7 @@ def heartbeat_loop():
         if not finger_detected:
             # First contact — start the 40-second window
             finger_placed_at = time.time()
-            log.info("👆 Finger detected — starting 40s scan timer")
+            log.info(f"👆 [DEBUG] Finger DETECTED (ir={ir_value}) — starting {SCAN_DURATION}s scan timer")
 
         finger_detected = True
         finger_removed_sent = False
@@ -256,14 +283,16 @@ def heartbeat_loop():
                 rates.pop(0)
                 rates.append(float(raw_bpm))
             heart_readings += 1
+            log.info(f"💓 [DEBUG] BPM sample #{heart_readings}: raw_bpm={raw_bpm:.1f}, avg_hr={sum(rates)/len(rates):.1f}, ir={ir_value}")
 
         avg_hr = sum(rates) / len(rates) if rates else 0
 
-        sio.emit("pi-vitals-data", {"bpm": avg_hr, "progress": progress})
-        if heart_readings % 5 == 0:
-            log.info(f"📊 Elapsed: {elapsed:.1f}s  Progress: {progress}%  HR: {avg_hr:.1f}")
+        emit_payload = {"bpm": avg_hr, "progress": progress}
+        sio.emit("pi-vitals-data", emit_payload)
+        log.info(f"� [DEBUG] Emitted pi-vitals-data → bpm={avg_hr:.1f}, progress={progress}%, elapsed={elapsed:.1f}s")
 
         if progress >= 100:
+            log.info(f"✅ [DEBUG] Progress hit 100% — completing scan. Total BPM samples: {len(rates)}")
             complete_scan()
 
         time.sleep(0.1)
@@ -290,6 +319,7 @@ def connect_error(data):
 @sio.on("sensor-status")
 def on_sensor_status(data):
     s = data.get("status", "")
+    log.info(f"📥 [DEBUG] Received sensor-status: {s}")
     if s == "waiting_for_finger": set_states(vs=VitalsState.WAITING)
     elif s == "finger_removed": set_states(vs=VitalsState.FINGER_REMOVED)
 
@@ -300,38 +330,48 @@ def on_vitals_progress(data):
 
 @sio.on("vitals-complete")
 def on_vitals_complete(data):
+    log.info(f"📥 [DEBUG] Received vitals-complete: {data}")
     set_states(vs=VitalsState.COMPLETE, rs=RfidState.IDLE)
 
 @sio.on("rfid-led-session")
-def on_rfid_led_session(data=None): set_states(rs=RfidState.SESSION)
+def on_rfid_led_session(data=None):
+    log.info("📥 [DEBUG] Received rfid-led-session → LED RED")
+    set_states(rs=RfidState.SESSION)
 
 @sio.on("rfid-led-test")
-def on_rfid_led_test(data=None): set_states(rs=RfidState.TEST)
+def on_rfid_led_test(data=None):
+    log.info("📥 [DEBUG] Received rfid-led-test → LED BLUE")
+    set_states(rs=RfidState.TEST)
 
 @sio.on("rfid-led-idle")
-def on_rfid_led_idle(data=None): set_states(rs=RfidState.IDLE)
+def on_rfid_led_idle(data=None):
+    log.info("📥 [DEBUG] Received rfid-led-idle → LED GREEN")
+    set_states(rs=RfidState.IDLE)
 
 @sio.on("system-reset")
 def on_system_reset(data=None):
+    log.warning("⚠️  [DEBUG] Received system-reset → resetting all states, is_scanning=False")
     set_states(vs=VitalsState.IDLE, rs=RfidState.IDLE)
     global is_scanning
     with _lock: is_scanning = False
 
 @sio.on("rfid-scan")
-def on_rfid_scan(data=None): set_states(vs=VitalsState.IDLE)
+def on_rfid_scan(data=None):
+    log.info(f"📥 [DEBUG] Received rfid-scan → vitals LED idle")
+    set_states(vs=VitalsState.IDLE)
 
 # --- Heartbeat ---
 @sio.on("start-vitals-scan")
 def on_start_vitals(*args):
     global is_scanning
-    log.info("🟢 Start Vitals Scan")
+    log.info("🟢 [DEBUG] Received start-vitals-scan → is_scanning=True")
     with _lock: is_scanning = True
     reset_scan_state()
 
 @sio.on("stop-vitals-scan")
 def on_stop_vitals(*args):
     global is_scanning
-    log.info("🟠 Stop Vitals Scan")
+    log.warning(f"🟠 [DEBUG] Received stop-vitals-scan → is_scanning=False (was {is_scanning})")
     with _lock: is_scanning = False
 
 # ==================== MAIN ====================

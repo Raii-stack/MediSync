@@ -60,10 +60,10 @@ Device.pin_factory = RPiGPIOFactory()
 
 
 
-# Common Cathode LEDs: active_high=True so value=1.0 → GPIO HIGH → LED ON.
-# Set LED_COMMON_ANODE=true in env only if you are using common anode LEDs.
-IS_COMMON_ANODE = os.environ.get("LED_COMMON_ANODE", "false").lower() == "true"
-active_high = not IS_COMMON_ANODE
+# SMD5050 Common Anode LEDs: active_high=False so value=1.0 → pin LOW → LED ON.
+# Set LED_COMMON_ANODE=false in env only if you are using common cathode LEDs.
+IS_COMMON_ANODE = os.environ.get("LED_COMMON_ANODE", "true").lower() == "true"
+active_high = not IS_COMMON_ANODE  # False for common anode (pin LOW = LED ON)
 
 vitals_r = PWMLED(VITALS_R_PIN, active_high=active_high)
 vitals_g = PWMLED(VITALS_G_PIN, active_high=active_high)

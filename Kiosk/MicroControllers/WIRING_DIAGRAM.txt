@@ -121,12 +121,12 @@ See: Kiosk/MicroControllers/led_service/led_status.py
 RASPBERRY PI STATUS LED WIRING:
 ================================
 
-LED Type: Common Cathode RGB LED
+LED Type: Common Anode RGB LED (SMD5050)
 
   R → RPi BCM GPIO 17 (via 220Ω resistor)  [configurable: LED_R_PIN]
   G → RPi BCM GPIO 27 (via 220Ω resistor)  [configurable: LED_G_PIN]
   B → RPi BCM GPIO 22 (via 220Ω resistor)  [configurable: LED_B_PIN, not currently driven]
-  Common Cathode → GND (Pi physical pin 9 or any GND)
+  Common Anode → 3.3V (Pi physical pin 1 or 17)
 
 LED States:
   🟢 Slow breathing green  = System idle, backend connected
@@ -139,12 +139,12 @@ LED States:
 RASPBERRY PI RFID STATUS LED WIRING:
 ======================================
 
-LED Type: Common Cathode RGB LED
+LED Type: Common Anode RGB LED (SMD5050)
 
   R → RPi BCM GPIO 23 (via 220Ω resistor)  [configurable: RFID_LED_R_PIN]
   G → RPi BCM GPIO 24 (via 220Ω resistor)  [configurable: RFID_LED_G_PIN]
   B → RPi BCM GPIO 25 (via 220Ω resistor)  [configurable: RFID_LED_B_PIN]
-  Common Cathode → GND (Pi physical pin 9 or any GND)
+  Common Anode → 3.3V (Pi physical pin 1 or 17)
 
 LED States:
   🟢 Solid green           = RFID scanner idle, ready to scan
