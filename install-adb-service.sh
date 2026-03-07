@@ -33,7 +33,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
+User=medisync
 ExecStart=$SCRIPT_PATH
 Restart=always
 RestartSec=10

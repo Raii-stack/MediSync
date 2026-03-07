@@ -161,10 +161,10 @@ def heartbeat_loop():
             mock_hr = 75.0 + (current_time % 5)
             
             if len(rates) < RATE_SIZE:
-                rates.append(mock_hr)
+                rates.append(float(mock_hr))
             else:
                 rates.pop(0)
-                rates.append(mock_hr)
+                rates.append(float(mock_hr))
                 
             heart_readings += 1
             avg_hr = sum(rates) / len(rates)

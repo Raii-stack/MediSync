@@ -41,7 +41,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
+User=medisync
 WorkingDirectory=$K_DIR
 # Adjust to your backend URL if it's hosted elsewhere
 Environment="BACKEND_URL=http://localhost:3001"

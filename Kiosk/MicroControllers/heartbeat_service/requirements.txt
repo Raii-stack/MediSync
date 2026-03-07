@@ -1,3 +1,3 @@
-max30102
+max30102-python
 python-socketio[client]
 requests
