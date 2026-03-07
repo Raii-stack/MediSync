@@ -41,10 +41,10 @@ RFID_R_PIN   = int(os.environ.get("RFID_LED_R_PIN", 23))
 RFID_G_PIN   = int(os.environ.get("RFID_LED_G_PIN", 24))
 RFID_B_PIN   = int(os.environ.get("RFID_LED_B_PIN", 25))
 
-IS_COMMON_ANODE = os.environ.get("LED_COMMON_ANODE", "true").lower() == "true"
-active_high = not IS_COMMON_ANODE  # False for common anode (SMD5050)
+IS_COMMON_ANODE = os.environ.get("LED_COMMON_ANODE", "false").lower() == "true"
+active_high = not IS_COMMON_ANODE  # True for common cathode (GPIO HIGH = LED ON)
 
-# All LEDs are SMD5050 common anode — active low, so active_high=False for all
+# Common Cathode LEDs — active_high=True so value=1.0 → GPIO HIGH → LED ON
 vitals_r = PWMLED(VITALS_R_PIN, active_high=active_high)
 vitals_g = PWMLED(VITALS_G_PIN, active_high=active_high)
 rfid_r   = PWMLED(RFID_R_PIN, active_high=active_high)
@@ -203,10 +203,12 @@ def heartbeat_loop():
                 ir_value = 0
                 time.sleep(0.5)
         else:
-            ir_value = 60000 if not waiting_prompt_sent else ir_value
+            # Simulation mode: always provide a finger-present signal unless
+            # we are simulating a 'waiting for finger' pause.
             if not finger_detected and waiting_prompt_sent:
+                # Simulate brief absence then place finger
                 time.sleep(2)
-                ir_value = 60000
+            ir_value = 60000  # Simulated finger-present IR value
 
         if ir_value < 50000:
             if finger_detected:
@@ -245,6 +247,8 @@ def heartbeat_loop():
             last_beat = current_time
             # Simple IR-to-BPM mapping — replace with hrcalc when hardware is confirmed
             # Simulated value derived from IR amplitude variation
+            if ir_value is None:
+                continue
             raw_bpm = 60.0 + (int(ir_value) % 30)  # placeholder until real beat detection
             if len(rates) < RATE_SIZE:
                 rates.append(float(raw_bpm))

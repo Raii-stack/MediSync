@@ -102,10 +102,12 @@ export function VitalSignsScreen() {
       navigate("/symptoms");
     }, MAX_SCAN_DURATION_MS);
 
-    // Cleanup: stop scan when component unmounts
+    // Cleanup: stop scan and LED blink when component unmounts (page refresh / navigation away)
     return () => {
       if (timer) clearTimeout(timer);
       clearTimeout(maxDurationTimer);
+      // Always stop the LED blink on unmount to prevent it getting stuck
+      axios.post(`${API_BASE}/api/esp32/stop-blink`).catch(console.error);
       if (isScanActiveRef.current) {
         isScanActiveRef.current = false;
         axios.post(`${API_BASE}/api/scan/stop`).catch(console.error);

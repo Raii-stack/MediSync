@@ -372,10 +372,15 @@ io.on("connection", (socket) => {
     `✅ Client connected: ${socket.id}${sessionId ? ` (session ${sessionId})` : ""}`,
   );
 
-  // Emit system-reset so the LED service (and any listeners) go back to idle
-  // This handles the case where a page reload connects before the previous
-  // disconnect has been processed, or where the LED was left in a stuck state.
-  io.emit("system-reset");
+  // Emit system-reset ONLY to the newly connecting socket so that active
+  // scans / LED states on other clients (hardware service) are not disrupted.
+  // We no longer broadcast to all — that was killing active vitals scans and
+  // resetting the RFID LED to idle whenever any client reconnected.
+  if (hardware.stopBlinkLED) {
+    hardware.stopBlinkLED(); // stop any lingering ESP32 LED blink on reconnect
+  }
+  socket.emit("system-reset");
+  socket.emit("stop-vitals-scan");
 
   socket.on("disconnect", (reason) => {
     if (sessionId && activeSessionSockets.get(sessionId) === socket.id) {
@@ -391,6 +396,9 @@ io.on("connection", (socket) => {
     if (hardware.stopScan) {
       hardware.stopScan();
     }
+    if (hardware.stopBlinkLED) {
+      hardware.stopBlinkLED(); // stop LED blink on disconnect
+    }
     if (hardware.sessionEnd) {
       hardware.sessionEnd();
     }
@@ -400,6 +408,7 @@ io.on("connection", (socket) => {
 
     // Tell the LED service (and any other listeners) to go back to idle
     io.emit("system-reset");
+    io.emit("stop-vitals-scan");
   });
 
   // Listeners for Respiratory Pi Heartbeat Sensor Service
