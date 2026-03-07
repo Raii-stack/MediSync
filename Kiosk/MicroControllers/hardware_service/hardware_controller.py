@@ -42,15 +42,14 @@ RFID_G_PIN   = int(os.environ.get("RFID_LED_G_PIN", 24))
 RFID_B_PIN   = int(os.environ.get("RFID_LED_B_PIN", 25))
 
 IS_COMMON_ANODE = os.environ.get("LED_COMMON_ANODE", "true").lower() == "true"
-active_high = not IS_COMMON_ANODE
+active_high = not IS_COMMON_ANODE  # False for common anode (SMD5050)
 
+# All LEDs are SMD5050 common anode — active low, so active_high=False for all
 vitals_r = PWMLED(VITALS_R_PIN, active_high=active_high)
 vitals_g = PWMLED(VITALS_G_PIN, active_high=active_high)
-
-# RFID SMD5050 LEDs are specifically wired as Active Low (ground activation)
-rfid_r   = PWMLED(RFID_R_PIN, active_high=not active_high)
-rfid_g   = PWMLED(RFID_G_PIN, active_high=not active_high)
-rfid_b   = PWMLED(RFID_B_PIN, active_high=not active_high)
+rfid_r   = PWMLED(RFID_R_PIN, active_high=active_high)
+rfid_g   = PWMLED(RFID_G_PIN, active_high=active_high)
+rfid_b   = PWMLED(RFID_B_PIN, active_high=active_high)
 
 class VitalsState:
     IDLE           = "idle"
@@ -192,6 +191,9 @@ def heartbeat_loop():
         if sensor:
             try:
                 red, ir = sensor.read_sequential()
+                if ir is None:
+                    time.sleep(0.02)  # FIFO empty, wait for next sample
+                    continue
                 ir_value = ir
             except Exception as e:
                 log.error(f"Sensor read error: {e}")
