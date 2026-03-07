@@ -39,9 +39,18 @@ export function IdleTimeoutProvider({
     sessionStorage.removeItem("vitals");
     
     // Attempt backend session end call (optional)
-    fetch("http://localhost:3001/api/session/end", { method: "POST" }).catch(() => {});
+    try {
+      // Just do a relative or dynamic fetch so it doesn't hit the tablet's localhost
+      fetch("/api/session/end", { method: "POST" }).catch(() => {});
+    } catch(e) {}
     
     navigate("/", { replace: true });
+    // Fallback hard redirect for aggressive mobile browsers
+    setTimeout(() => {
+      if (window.location.pathname !== "/") {
+        window.location.href = "/";
+      }
+    }, 100);
   };
 
   // 1) Countdown the remaining time while the warning is shown

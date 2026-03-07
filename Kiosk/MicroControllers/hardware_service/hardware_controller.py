@@ -343,20 +343,23 @@ def heartbeat_loop():
             else:
                 log.debug(f"🌡️ [DEBUG] MLX90614 module missing or not initialized")
             
-            if len(temps) < RATE_SIZE * 2:  # Temp can have more samples
-                temps.append(float(raw_temp))
-            else:
-                temps.pop(0)
-                temps.append(float(raw_temp))
+            if raw_temp > 20:
+                if len(temps) < RATE_SIZE * 2:  # Temp can have more samples
+                    temps.append(float(raw_temp))
+                else:
+                    temps.pop(0)
+                    temps.append(float(raw_temp))
 
             log.info(f"💓 [DEBUG] BPM sample #{heart_readings}: raw_bpm={raw_bpm:.1f}, avg_hr={sum(rates)/len(rates):.1f}, temp={raw_temp:.1f}°C")
 
         avg_hr = sum(rates) / len(rates) if rates else 0
-        avg_temp = sum(temps) / len(temps) if temps else 0
 
-        emit_payload = {"bpm": avg_hr, "temp": avg_temp, "progress": progress}
+        # Send raw live temperature data to frontend instead of rolling average
+        raw_temp_to_emit = raw_temp if raw_temp is not None else 0.0
+
+        emit_payload = {"bpm": avg_hr, "temp": raw_temp_to_emit, "progress": progress}
         sio.emit("pi-vitals-data", emit_payload)
-        log.info(f"� [DEBUG] Emitted pi-vitals-data → bpm={avg_hr:.1f}, progress={progress}%, elapsed={elapsed:.1f}s")
+        log.info(f" [DEBUG] Emitted pi-vitals-data → bpm={avg_hr:.1f}, temp={raw_temp_to_emit:.1f}°C, progress={progress}%, elapsed={elapsed:.1f}s")
 
         if progress >= 100:
             log.info(f"✅ [DEBUG] Progress hit 100% — completing scan. Total BPM samples: {len(rates)}")
