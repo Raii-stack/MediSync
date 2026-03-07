@@ -142,6 +142,7 @@ def led_animation_loop():
 
 # ==================== HEARTBEAT SETUP ====================
 is_scanning = False
+hb_sensor = None  # Global reference so socket handlers can call wakeup/shutdown
 finger_detected = False
 waiting_prompt_sent = False
 finger_removed_sent = False
@@ -173,7 +174,7 @@ def complete_scan():
         log.info(f"✅ Vitals scan complete. Final HR: {avg_hr:.1f}")
 
 def heartbeat_loop():
-    global finger_detected, waiting_prompt_sent, finger_removed_sent, rates, last_beat, heart_readings, finger_placed_at
+    global finger_detected, waiting_prompt_sent, finger_removed_sent, rates, last_beat, heart_readings, finger_placed_at, hb_sensor
     
     sensor = None
     if MAX30102:
@@ -184,6 +185,10 @@ def heartbeat_loop():
             try:
                 sensor = MAX30102()
                 log.info("✅ [DEBUG] MAX30102 initialized successfully on I2C bus.")
+                # Put sensor to sleep immediately — it will be woken on scan start.
+                # This prevents the FIFO from filling up and stalling during idle.
+                sensor.shutdown()
+                log.info("💤 [DEBUG] Sensor put into shutdown mode (FIFO won't fill during idle)")
                 break
             except Exception as e:
                 log.warning(f"MAX30102 init attempt {attempt}/{MAX_RETRIES} failed: {e}")
@@ -196,9 +201,11 @@ def heartbeat_loop():
     else:
         log.warning("⚠️  [DEBUG] max30102 module missing. Running in SIMULATION mode.")
 
+    hb_sensor = sensor  # Store globally for socket handlers
     log.info(f"🔧 [DEBUG] Heartbeat loop started. sensor={'REAL' if sensor else 'SIMULATION'}, is_scanning={is_scanning}")
 
     loop_count = 0
+    null_read_count = 0  # Track consecutive empty FIFO reads
     while not _stop_event.is_set():
         with _lock:
             scanning = is_scanning
@@ -206,6 +213,7 @@ def heartbeat_loop():
         if not scanning:
             # Log idle state every 10 seconds so we know the loop is alive
             loop_count += 1
+            null_read_count = 0  # reset when not scanning
             if loop_count % 20 == 0:  # every ~10s at 0.5s sleep
                 log.debug(f"💤 [DEBUG] Heartbeat loop idle — waiting for start-vitals-scan event (is_scanning=False)")
             time.sleep(0.5)
@@ -217,8 +225,21 @@ def heartbeat_loop():
             try:
                 red, ir = sensor.read_sequential()
                 if ir is None:
+                    null_read_count += 1
+                    # Log every 50 null reads (~1 second) so we know FIFO is empty
+                    if null_read_count % 50 == 1:
+                        log.warning(f"⚠️  [DEBUG] Sensor FIFO empty (null read #{null_read_count}) — no data from MAX30102")
+                    if null_read_count >= 500:  # ~10 seconds of nothing
+                        log.error(f"❌ [DEBUG] Sensor FIFO stuck after {null_read_count} null reads! Attempting FIFO reset...")
+                        try:
+                            sensor.wakeup()
+                            log.info("🔄 [DEBUG] Sensor FIFO reset + wakeup completed")
+                        except Exception as e:
+                            log.error(f"❌ [DEBUG] Sensor wakeup failed: {e}")
+                        null_read_count = 0
                     time.sleep(0.02)  # FIFO empty, wait for next sample
                     continue
+                null_read_count = 0  # Got data, reset counter
                 ir_value = ir
                 log.debug(f"📡 [DEBUG] Sensor read: red={red}, ir={ir_value}")
             except Exception as e:
@@ -365,6 +386,13 @@ def on_rfid_scan(data=None):
 def on_start_vitals(*args):
     global is_scanning
     log.info("🟢 [DEBUG] Received start-vitals-scan → is_scanning=True")
+    # Wake up the sensor and flush FIFO so fresh data flows
+    if hb_sensor:
+        try:
+            hb_sensor.wakeup()
+            log.info("🔄 [DEBUG] Sensor woken up + FIFO reset for fresh scan")
+        except Exception as e:
+            log.error(f"❌ [DEBUG] Sensor wakeup failed: {e}")
     with _lock: is_scanning = True
     reset_scan_state()
 
@@ -373,6 +401,13 @@ def on_stop_vitals(*args):
     global is_scanning
     log.warning(f"🟠 [DEBUG] Received stop-vitals-scan → is_scanning=False (was {is_scanning})")
     with _lock: is_scanning = False
+    # Put sensor back to sleep to prevent FIFO filling during idle
+    if hb_sensor:
+        try:
+            hb_sensor.shutdown()
+            log.info("💤 [DEBUG] Sensor put back to shutdown mode")
+        except Exception as e:
+            log.error(f"❌ [DEBUG] Sensor shutdown failed: {e}")
 
 # ==================== MAIN ====================
 def main():

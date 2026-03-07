@@ -35,20 +35,18 @@ class MAX30102:
         self.bus.write_byte_data(self.address, REG_INTR_ENABLE_1, 0xc0)
         self.bus.write_byte_data(self.address, REG_INTR_ENABLE_2, 0x00)
         
-        # FIFO_WR_PTR[4:0]
+        # Reset FIFO pointers
         self.bus.write_byte_data(self.address, REG_FIFO_WR_PTR, 0x00)
-        # OVF_COUNTER[4:0]
         self.bus.write_byte_data(self.address, REG_OVF_COUNTER, 0x00)
-        # FIFO_RD_PTR[4:0]
         self.bus.write_byte_data(self.address, REG_FIFO_RD_PTR, 0x00)
         
-        # 0b01001111 # sample avg = 4, fifo rollover = false, fifo almost full = 17
+        # sample avg = 4, fifo rollover = false, fifo almost full = 17
         self.bus.write_byte_data(self.address, REG_FIFO_CONFIG, 0x4f)
         
-        # 0b00000010 # SPO2 mode
+        # SPO2 mode
         self.bus.write_byte_data(self.address, REG_MODE_CONFIG, 0x03)
         
-        # 0b00100111 # SPO2_ADC range = 4096nA, SPO2 sample rate (100 Hz), LED pulseWidth (411uS)
+        # SPO2_ADC range = 4096nA, SPO2 sample rate (100 Hz), LED pulseWidth (411uS)
         self.bus.write_byte_data(self.address, REG_SPO2_CONFIG, 0x27)
         
         # LED currents
@@ -58,6 +56,32 @@ class MAX30102:
         # Clear interrupts
         self.bus.read_byte_data(self.address, REG_INTR_STATUS_1)
         self.bus.read_byte_data(self.address, REG_INTR_STATUS_2)
+
+    def reset_fifo(self):
+        """Clear FIFO pointers and overflow counter. Call before each scan
+        to flush stale data and allow the sensor to write fresh samples."""
+        self.bus.write_byte_data(self.address, REG_FIFO_WR_PTR, 0x00)
+        self.bus.write_byte_data(self.address, REG_OVF_COUNTER, 0x00)
+        self.bus.write_byte_data(self.address, REG_FIFO_RD_PTR, 0x00)
+        # Clear any pending interrupts
+        self.bus.read_byte_data(self.address, REG_INTR_STATUS_1)
+        self.bus.read_byte_data(self.address, REG_INTR_STATUS_2)
+
+    def shutdown(self):
+        """Put sensor into shutdown/low-power mode. Stops data collection
+        so the FIFO doesn't fill up during idle periods."""
+        # Read current mode, set SHDN bit (bit 7)
+        current = self.bus.read_byte_data(self.address, REG_MODE_CONFIG)
+        self.bus.write_byte_data(self.address, REG_MODE_CONFIG, current | 0x80)
+
+    def wakeup(self):
+        """Wake sensor from shutdown mode and restart data collection.
+        Also resets the FIFO so only fresh samples are read."""
+        self.reset_fifo()
+        # Re-enter SpO2 mode (clears SHDN bit)
+        self.bus.write_byte_data(self.address, REG_MODE_CONFIG, 0x03)
+        # Give sensor time to start collecting
+        time.sleep(0.1)
 
     def read_sequential(self):
         # Read a single sample from the FIFO
