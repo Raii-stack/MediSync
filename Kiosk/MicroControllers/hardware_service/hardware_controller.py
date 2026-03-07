@@ -381,14 +381,14 @@ def heartbeat_loop():
 
             log.info(f"💓 [DEBUG] BPM sample #{heart_readings}: raw_bpm={raw_bpm:.1f}, avg_hr={sum(rates)/len(rates):.1f}, temp={raw_temp:.1f}°C")
 
-        avg_hr = sum(rates) / len(rates) if rates else 0
-
-        # Send raw live temperature data to frontend instead of rolling average
+        # Send raw live data to frontend instead of rolling averages
+        # The Node.js backend already collects these and performs the final true average
         raw_temp_to_emit = raw_temp if raw_temp is not None else 0.0
+        raw_bpm_to_emit = rates[-1] if rates else 0.0
 
-        emit_payload = {"bpm": avg_hr, "temp": raw_temp_to_emit, "progress": progress}
+        emit_payload = {"bpm": raw_bpm_to_emit, "temp": raw_temp_to_emit, "progress": progress}
         sio.emit("pi-vitals-data", emit_payload)
-        log.info(f" [DEBUG] Emitted pi-vitals-data → bpm={avg_hr:.1f}, temp={raw_temp_to_emit:.1f}°C, progress={progress}%, elapsed={elapsed:.1f}s")
+        log.info(f" [DEBUG] Emitted pi-vitals-data → bpm={raw_bpm_to_emit:.1f}, temp={raw_temp_to_emit:.1f}°C, progress={progress}%, elapsed={elapsed:.1f}s")
 
         if progress >= 100:
             log.info(f"✅ [DEBUG] Progress hit 100% — completing scan. Total BPM samples: {len(rates)}")
