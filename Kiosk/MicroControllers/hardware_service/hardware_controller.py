@@ -300,18 +300,15 @@ def heartbeat_loop():
             continue
 
         # ── Finger is present ────────────────────────────────────────────────
-        if not finger_detected:
-            # First contact — start the 40-second window
-            finger_placed_at = time.time()
-            log.info(f"👆 [DEBUG] Finger DETECTED (ir={ir_value}) — starting {SCAN_DURATION}s scan timer")
-
-        finger_detected = True
-        finger_removed_sent = False
-        waiting_prompt_sent = False
-
         current_time = time.time()
+        
+        # Don't start the countdown until we get at least one valid heart reading
+        if len(rates) > 0 and finger_placed_at == 0:
+            finger_placed_at = current_time
+            log.info(f"👆 [DEBUG] First beat detected — starting {SCAN_DURATION}s scan timer")
+            
         elapsed = current_time - finger_placed_at if finger_placed_at > 0 else 0
-        progress = min(100, int((elapsed / SCAN_DURATION) * 100))
+        progress = min(100, int((elapsed / SCAN_DURATION) * 100)) if finger_placed_at > 0 else 0
 
         # Collect a BPM sample roughly every 0.8 s using raw IR value heuristic
         if current_time - last_beat > 0.8:
@@ -329,11 +326,19 @@ def heartbeat_loop():
             heart_readings += 1
             
             # Read Temperature
-            raw_temp = 36.5  # Simulation default
+            raw_temp = 0
             if temp_sensor:
-                t = temp_sensor.read_object_temp_c()
-                if t is not None and t > 20 and t < 50:
-                    raw_temp = t
+                try:
+                    t = temp_sensor.read_object_temp_c()
+                    # Add debug log for temperature sensor just like heartbeat
+                    log.debug(f"🌡️ [DEBUG] MLX90614 read: {t} °C")
+                    
+                    if t is not None and t > 20 and t < 50:
+                        raw_temp = t
+                except Exception as e:
+                    log.error(f"❌ [DEBUG] MLX90614 read error: {e}")
+            else:
+                log.debug(f"🌡️ [DEBUG] MLX90614 module missing or not initialized")
             
             if len(temps) < RATE_SIZE * 2:  # Temp can have more samples
                 temps.append(float(raw_temp))

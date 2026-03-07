@@ -29,6 +29,7 @@ export function VitalSignsScreen() {
   const isScanActiveRef = useRef(false);
   const bpmSamplesRef = useRef<number[]>([]);
   const tempSamplesRef = useRef<number[]>([]);
+  const maxDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // Start the vitals scan when component mounts
@@ -55,61 +56,10 @@ export function VitalSignsScreen() {
     }, 5000);
     setPromptTimer(timer);
 
-    const maxDurationTimer = setTimeout(async () => {
-      if (hasNavigatedRef.current) return;
-
-      console.log("⏱️ Vitals max duration reached. Stopping scan and proceeding to symptoms.");
-      setStatusText("Time limit reached. Proceeding...");
-      hasNavigatedRef.current = true;
-      isScanActiveRef.current = false;
-      setIsScanning(false);
-      setShowSensorPrompt(false);
-
-      const bpmSamples = bpmSamplesRef.current;
-      const tempSamples = tempSamplesRef.current;
-      const avgBpm = bpmSamples.length
-        ? Math.round(bpmSamples.reduce((sum, value) => sum + value, 0) / bpmSamples.length)
-        : heartRate;
-      const avgTemp = tempSamples.length
-        ? parseFloat(
-            (tempSamples.reduce((sum, value) => sum + value, 0) / tempSamples.length).toFixed(1),
-          )
-        : temperature;
-
-      // Always store whatever vitals we have — use 0 as fallback for missing
-      const finalBpm = avgBpm ?? 0;
-      const finalTemp = avgTemp ?? 0;
-
-      console.log(`📊 Timeout vitals: BPM=${finalBpm} (${bpmSamples.length} samples), Temp=${finalTemp} (${tempSamples.length} samples)`);
-
-      setHeartRate(finalBpm);
-      setTemperature(finalTemp);
-      setVitalSigns({
-        heartRate: finalBpm,
-        temperature: finalTemp,
-        oxygenLevel: 98,
-      });
-      sessionStorage.setItem(
-        "vitals",
-        JSON.stringify({
-          bpm: finalBpm,
-          temp: finalTemp,
-        }),
-      );
-
-      try {
-        await axios.post(`${API_BASE}/api/scan/stop`);
-      } catch (error) {
-        console.error("❌ Error stopping scan after timeout:", error);
-      }
-
-      navigate("/symptoms");
-    }, MAX_SCAN_DURATION_MS);
-
     // Cleanup: stop scan and LED blink when component unmounts (page refresh / navigation away)
     return () => {
       if (timer) clearTimeout(timer);
-      clearTimeout(maxDurationTimer);
+      
       // Always stop the LED blink on unmount to prevent it getting stuck
       axios.post(`${API_BASE}/api/esp32/stop-blink`).catch(console.error);
       if (isScanActiveRef.current) {
@@ -141,13 +91,63 @@ export function VitalSignsScreen() {
     }) => {
       console.log("📊 Vitals progress:", data);
 
-      // Mark that we've received data
-      if (data.bpm || data.temp) {
-        if (!hasReceivedData) {
-          console.log("✅ First sensor data received, hiding prompt");
-          setHasReceivedData(true);
-        }
-        setShowSensorPrompt(false); // Hide prompt when data starts coming (LED will auto-stop via useEffect)
+      // Start the max duration timer only on the first valid data pulse
+      if (!hasReceivedData && (data.bpm > 0 || data.temp > 0)) {
+        console.log("✅ First sensor data received, hiding prompt and starting 45s max scan timer");
+        setHasReceivedData(true);
+        setShowSensorPrompt(false); // Hide prompt when data starts coming
+
+        // Start the safety timeout timer now
+        maxDurationTimerRef.current = setTimeout(async () => {
+          if (hasNavigatedRef.current) return;
+
+          console.log("⏱️ Vitals max duration reached. Stopping scan and proceeding to symptoms.");
+          setStatusText("Time limit reached. Proceeding...");
+          hasNavigatedRef.current = true;
+          isScanActiveRef.current = false;
+          setIsScanning(false);
+          setShowSensorPrompt(false);
+
+          const bpmSamples = bpmSamplesRef.current;
+          const tempSamples = tempSamplesRef.current;
+          const avgBpm = bpmSamples.length
+            ? Math.round(bpmSamples.reduce((sum, value) => sum + value, 0) / bpmSamples.length)
+            : heartRate;
+          const avgTemp = tempSamples.length
+            ? parseFloat(
+                (tempSamples.reduce((sum, value) => sum + value, 0) / tempSamples.length).toFixed(1),
+              )
+            : temperature;
+
+          // Always store whatever vitals we have — use 0 as fallback for missing
+          const finalBpm = avgBpm ?? 0;
+          const finalTemp = avgTemp ?? 0;
+
+          console.log(`📊 Timeout vitals: BPM=${finalBpm} (${bpmSamples.length} samples), Temp=${finalTemp} (${tempSamples.length} samples)`);
+
+          setHeartRate(finalBpm);
+          setTemperature(finalTemp);
+          setVitalSigns({
+            heartRate: finalBpm,
+            temperature: finalTemp,
+            oxygenLevel: 98,
+          });
+          sessionStorage.setItem(
+            "vitals",
+            JSON.stringify({
+              bpm: finalBpm,
+              temp: finalTemp,
+            }),
+          );
+
+          try {
+            await axios.post(`${API_BASE}/api/scan/stop`);
+          } catch (error) {
+            console.error("❌ Error stopping scan after timeout:", error);
+          }
+
+          navigate("/symptoms");
+        }, MAX_SCAN_DURATION_MS);
       }
 
       // Update heart rate and temperature with real data
