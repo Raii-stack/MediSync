@@ -23,7 +23,7 @@ export function IdleTimeoutProvider({
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Pages where idle timeout should NOT apply
-  const excludedPaths = ["/", "/admin"];
+  const excludedPaths = ["/", "/admin", "/vitals"];
   const isExcluded = excludedPaths.includes(location.pathname);
 
   // Stop tracking if on an excluded path
@@ -42,25 +42,6 @@ export function IdleTimeoutProvider({
     if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
   };
 
-  const handleIdleWarning = () => {
-    if (isExcluded) return;
-    setShowWarning(true);
-    setRemainingTime(Math.ceil(warningMs / 1000));
-
-    // Start a countdown interval for the modal
-    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-    
-    countdownIntervalRef.current = setInterval(() => {
-      setRemainingTime((prev) => {
-        if (prev <= 1) {
-          handleTimeout();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-
   const handleTimeout = () => {
     clearAllTimers();
     setShowWarning(false);
@@ -74,6 +55,26 @@ export function IdleTimeoutProvider({
     fetch("http://localhost:3001/api/session/end", { method: "POST" }).catch(() => {});
     
     navigate("/");
+  };
+
+  // Trigger timeout when remainingTime hits 0
+  useEffect(() => {
+    if (showWarning && remainingTime <= 0) {
+      handleTimeout();
+    }
+  }, [remainingTime, showWarning]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleIdleWarning = () => {
+    if (isExcluded) return;
+    setShowWarning(true);
+    setRemainingTime(Math.ceil(warningMs / 1000));
+
+    // Start a countdown interval for the modal
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    
+    countdownIntervalRef.current = setInterval(() => {
+      setRemainingTime((prev) => prev - 1);
+    }, 1000);
   };
 
   const resetTimeout = () => {
