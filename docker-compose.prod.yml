@@ -36,7 +36,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "80:5173" # Serve on HTTP port 80 (or 443 for HTTPS)
+      - "8080:5173" # Serve on HTTP port 8080
     networks:
       - medisync-network
     environment:
