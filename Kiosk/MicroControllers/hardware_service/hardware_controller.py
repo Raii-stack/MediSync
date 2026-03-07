@@ -22,6 +22,12 @@ try:
 except ImportError:
     MAX30102 = None
 
+# Attempt to load mlx90614 (local file)
+try:
+    from mlx90614 import MLX90614
+except ImportError:
+    MLX90614 = None
+
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.DEBUG,
@@ -151,16 +157,18 @@ finger_placed_at = 0.0   # timestamp when finger was first detected this scan
 SCAN_DURATION = 40.0     # seconds — timer starts from when finger is placed
 RATE_SIZE = 8
 rates = []
+temps = []               # Track temperature readings
 last_beat = 0
 heart_readings = 0
 
 def reset_scan_state():
-    global finger_detected, waiting_prompt_sent, finger_removed_sent, rates, last_beat, heart_readings, finger_placed_at
+    global finger_detected, waiting_prompt_sent, finger_removed_sent, rates, temps, last_beat, heart_readings, finger_placed_at
     with _lock:
         finger_detected = False
         waiting_prompt_sent = False
         finger_removed_sent = False
         rates.clear()
+        temps.clear()
         last_beat = time.time()
         heart_readings = 0
         finger_placed_at = 0.0
@@ -170,13 +178,15 @@ def complete_scan():
     with _lock:
         is_scanning = False
         avg_hr = sum(rates) / len(rates) if rates else 0
-        sio.emit("pi-vitals-data", {"bpm": avg_hr, "progress": 100})
-        log.info(f"✅ Vitals scan complete. Final HR: {avg_hr:.1f}")
+        avg_temp = sum(temps) / len(temps) if temps else 0
+        sio.emit("pi-vitals-data", {"bpm": avg_hr, "temp": avg_temp, "progress": 100})
+        log.info(f"✅ Vitals scan complete. Final HR: {avg_hr:.1f}, Temp: {avg_temp:.1f}")
 
 def heartbeat_loop():
-    global finger_detected, waiting_prompt_sent, finger_removed_sent, rates, last_beat, heart_readings, finger_placed_at, hb_sensor
+    global finger_detected, waiting_prompt_sent, finger_removed_sent, rates, temps, last_beat, heart_readings, finger_placed_at, hb_sensor
     
     sensor = None
+    temp_sensor = None
     if MAX30102:
         MAX_RETRIES = 5
         RETRY_DELAY = 3  # seconds
@@ -200,6 +210,18 @@ def heartbeat_loop():
                     sensor = None
     else:
         log.warning("⚠️  [DEBUG] max30102 module missing. Running in SIMULATION mode.")
+
+    MLX_I2C_BUS = int(os.environ.get("MLX_I2C_BUS", 3))
+    if MLX90614:
+        log.info(f"🔧 [DEBUG] MLX90614 module found, attempting init on I2C bus {MLX_I2C_BUS}...")
+        try:
+            temp_sensor = MLX90614(bus_num=MLX_I2C_BUS)
+            log.info(f"✅ [DEBUG] MLX90614 initialized successfully on I2C bus {MLX_I2C_BUS}.")
+        except Exception as e:
+            log.error(f"❌ [DEBUG] MLX90614 could not be initialized: {e}")
+            temp_sensor = None
+    else:
+        log.warning("⚠️  [DEBUG] mlx90614 module missing.")
 
     hb_sensor = sensor  # Store globally for socket handlers
     log.info(f"🔧 [DEBUG] Heartbeat loop started. sensor={'REAL' if sensor else 'SIMULATION'}, is_scanning={is_scanning}")
@@ -266,6 +288,7 @@ def heartbeat_loop():
                 # Reset timer and readings when finger lifted
                 heart_readings = 0
                 rates.clear()
+                temps.clear()
                 finger_placed_at = 0.0
             else:
                 if not waiting_prompt_sent:
@@ -304,11 +327,26 @@ def heartbeat_loop():
                 rates.pop(0)
                 rates.append(float(raw_bpm))
             heart_readings += 1
-            log.info(f"💓 [DEBUG] BPM sample #{heart_readings}: raw_bpm={raw_bpm:.1f}, avg_hr={sum(rates)/len(rates):.1f}, ir={ir_value}")
+            
+            # Read Temperature
+            raw_temp = 36.5  # Simulation default
+            if temp_sensor:
+                t = temp_sensor.read_object_temp_c()
+                if t is not None and t > 20 and t < 50:
+                    raw_temp = t
+            
+            if len(temps) < RATE_SIZE * 2:  # Temp can have more samples
+                temps.append(float(raw_temp))
+            else:
+                temps.pop(0)
+                temps.append(float(raw_temp))
+
+            log.info(f"💓 [DEBUG] BPM sample #{heart_readings}: raw_bpm={raw_bpm:.1f}, avg_hr={sum(rates)/len(rates):.1f}, temp={raw_temp:.1f}°C")
 
         avg_hr = sum(rates) / len(rates) if rates else 0
+        avg_temp = sum(temps) / len(temps) if temps else 0
 
-        emit_payload = {"bpm": avg_hr, "progress": progress}
+        emit_payload = {"bpm": avg_hr, "temp": avg_temp, "progress": progress}
         sio.emit("pi-vitals-data", emit_payload)
         log.info(f"� [DEBUG] Emitted pi-vitals-data → bpm={avg_hr:.1f}, progress={progress}%, elapsed={elapsed:.1f}s")
 

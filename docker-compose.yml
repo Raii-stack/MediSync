@@ -51,8 +51,10 @@ services:
     devices:
       - "/dev/gpiochip0:/dev/gpiochip0"
       - "/dev/i2c-1:/dev/i2c-1" # required for MAX30102
+      - "/dev/i2c-3:/dev/i2c-3" # required for MLX90614 (software I2C)
     environment:
       - BACKEND_URL=http://localhost:3001
+      - MLX_I2C_BUS=3 # Software I2C bus number for Thermal Sensor
       # Vitals LED (R + G channels)
       - LED_R_PIN=17
       - LED_G_PIN=27

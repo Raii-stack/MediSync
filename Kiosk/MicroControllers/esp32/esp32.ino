@@ -1,5 +1,4 @@
 #include <Wire.h>
-#include <Adafruit_MLX90614.h>
 #include <ArduinoJson.h>
 #include <SPI.h>
 #include <MFRC522.h>
@@ -8,10 +7,6 @@
 #define ENABLE_RFID true
 
 // ==================== PIN MAP ====================
-// I2C Buses
-#define THERMAL_SDA 21
-#define THERMAL_SCL 22
-
 // SPI & RFID
 #define RFID_SS_PIN 5
 #define RFID_RST_PIN UINT8_MAX
@@ -46,8 +41,7 @@ unsigned long lastRfidRead = 0;
 #define UART_TX 1
 
 // ==================== GLOBAL OBJECTS ====================
-Adafruit_MLX90614 mlx = Adafruit_MLX90614();
-TwoWire I2C_Thermal = TwoWire(0);
+// (MLX90614 thermal sensor moved to Raspberry Pi)
 
 // ==================== VARIABLES ====================
 
@@ -106,16 +100,8 @@ void setup()
   Serial2.println("OK: RFID/NFC Scanner Ready");
 #endif
 
-  // Thermal Sensor Init
-  I2C_Thermal.begin(THERMAL_SDA, THERMAL_SCL, 100000);
-  if (!mlx.begin(0x5A, &I2C_Thermal))
-  {
-    Serial2.println("ERROR: Thermal Sensor Missing");
-  }
-  else
-  {
-    Serial2.println("OK: Thermal Sensor Ready");
-  }
+  // NOTE: Thermal sensor (MLX90614) has been moved to Raspberry Pi.
+  // It now shares the Pi's I2C bus with the MAX30102 heart rate sensor.
 
 
 
@@ -310,34 +296,14 @@ void unlockSolenoid()
 }
 
 // ==================== VITALS ====================
+// NOTE: Both heart rate (MAX30102) and temperature (MLX90614) sensors
+// have been moved to the Raspberry Pi. The ESP32 no longer reads vitals.
+// The READING_VITALS state is kept for backward compatibility with
+// commands that transition state, but it does nothing.
 void readVitalSigns()
 {
-  static unsigned long lastStreamTime = 0;
-  static bool initialized = false;
-
-  if (!initialized)
-  {
-    lastStreamTime = 0;
-    initialized = true;
-  }
-
-  // ESP32 now only reads temperature. Heart rate is handled by Raspberry Pi.
-  if (millis() - lastStreamTime >= 1000)
-  {
-    lastStreamTime = millis();
-    float tempC = mlx.readObjectTempC();
-    
-    // Only send valid readings
-    if (tempC > 20 && tempC < 50)
-    {
-      StaticJsonDocument<200> doc;
-      doc["event"] = "vitals_temp";
-      doc["temperature"] = ((int)(tempC * 10)) / 10.0;
-      String out;
-      serializeJson(doc, out);
-      Serial2.println(out);
-    }
-  }
+  // Nothing to do — Pi handles all vitals sensors now.
+  // Stay in READING_VITALS until the backend sends a reset/stop command.
 }
 
 void finishVitals(bool success)

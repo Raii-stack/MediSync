@@ -76,13 +76,17 @@ Common Ground:
   └─ Raspberry Pi GND (via USB-UART)
 
 
-I2C BUS SEPARATION (Important!):
 =================================
 
-Bus 0 (Wire):  GPIO 21 (SDA), GPIO 22 (SCL) → MLX90614 (5V device)
-Bus 1 (Wire1): GPIO 18 (SDA), GPIO 19 (SCL) → MAX30102 (3.3V device)
+(NOTE: Both sensors are connected to the Raspberry Pi.)
+To prevent I2C conflicts, the sensors are placed on separate I2C buses.
 
-Note: These buses are separated to avoid voltage conflicts between 5V and 3.3V I2C devices.
+Bus 1 (Hardware I2C): GPIO 2 (SDA), GPIO 3 (SCL) → MAX30102
+Bus 3 (Software I2C): GPIO 20 (SDA), GPIO 21 (SCL) → MLX90614
+
+ENABLE SOFTWARE I2C FOR MLX90614:
+Add the following line to your Raspberry Pi's `/boot/config.txt` (or `/boot/firmware/config.txt`) and reboot:
+`dtoverlay=i2c-gpio,bus=3,i2c_gpio_sda=20,i2c_gpio_scl=21`
 
 
 RELAY WIRING (Medicine Dispensing + Solenoid Lock):
@@ -184,10 +188,10 @@ Power:
 [ ] 5V pin has voltage
 [ ] All GNDs connected together
 
-Sensors:
-[ ] MLX90614: SDA→21, SCL→22, VCC→5V, GND→GND
-[ ] MAX30102: SDA→18, SCL→19, VCC→3.3V (!), GND→GND
-[ ] RC522: SS→5, RST→4, MOSI→23, MISO→19, SCK→18, VCC→3.3V, GND→GND
+Sensors (Raspberry Pi):
+[ ] MAX30102: SDA→Pi GPIO 2 (Pin 3), SCL→Pi GPIO 3 (Pin 5), VCC→3.3V (!), GND→GND
+[ ] MLX90614: SDA→Pi GPIO 20 (Pin 38), SCL→Pi GPIO 21 (Pin 40), VCC→3.3V/5V, GND→GND
+[ ] RC522 (ESP32 SPI): SS→5, RST→4, MOSI→23, MISO→19, SCK→18, VCC→3.3V, GND→ESP GND
 
 Outputs:
 [ ] Relay 1: IN→33, 2: IN→32, 3: IN→25, 4: IN→26

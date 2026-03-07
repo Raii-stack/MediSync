@@ -420,12 +420,14 @@ io.on("connection", (socket) => {
   });
 
   socket.on("pi-vitals-data", (data) => {
-    const currentTemp = vitalsSession.tempSamples.length > 0
-      ? vitalsSession.tempSamples[vitalsSession.tempSamples.length - 1]
-      : 0;
+    const currentTemp = data.temp || 0;
 
     if (data.bpm > 0) {
       vitalsSession.bpmSamples.push(data.bpm);
+    }
+    
+    if (currentTemp > 0) {
+      vitalsSession.tempSamples.push(currentTemp);
     }
 
     io.emit("vitals-progress", {
