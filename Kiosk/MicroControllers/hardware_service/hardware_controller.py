@@ -28,6 +28,12 @@ try:
 except ImportError:
     MLX90614 = None
 
+# Attempt to load hrcalc (local file)
+try:
+    from hrcalc import calc_hr_and_spo2
+except ImportError:
+    calc_hr_and_spo2 = None
+
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.DEBUG,
@@ -291,6 +297,8 @@ def heartbeat_loop():
                 heart_readings = 0
                 rates.clear()
                 temps.clear()
+                ir_data.clear()
+                red_data.clear()
                 finger_placed_at = 0.0
                 null_read_count = 0
             else:
@@ -313,19 +321,40 @@ def heartbeat_loop():
         elapsed = current_time - finger_placed_at if finger_placed_at > 0 else 0
         progress = min(100, int((elapsed / SCAN_DURATION) * 100)) if finger_placed_at > 0 else 0
 
-        # Collect a BPM sample roughly every 0.8 s using raw IR value heuristic
+        # Accumulate raw optical data for real hrcalc algorithm
+        if sensor and ir_value >= 50000:
+            ir_data.append(ir_value)
+            red_data.append(red if red else 0)
+            if len(ir_data) > 100:
+                ir_data.pop(0)
+                red_data.pop(0)
+
+        # Collect a BPM sample roughly every 0.8 s using real data if available
         if current_time - last_beat > 0.8:
             last_beat = current_time
-            # Simple IR-to-BPM mapping — replace with hrcalc when hardware is confirmed
-            # Simulated value derived from IR amplitude variation
-            if ir_value is None:
-                continue
-            raw_bpm = 60.0 + (int(ir_value) % 30)  # placeholder until real beat detection
-            if len(rates) < RATE_SIZE:
-                rates.append(float(raw_bpm))
+            
+            raw_bpm = 0
+            if calc_hr_and_spo2 and len(ir_data) >= 100:
+                try:
+                    hr, hr_valid, spo2, spo2_valid = calc_hr_and_spo2(ir_data, red_data)
+                    if hr_valid and 30 < hr < 200:
+                        raw_bpm = hr
+                    else:
+                        raw_bpm = rates[-1] if rates else 0 # Keep previous if algorithm fails
+                except Exception as e:
+                    log.error(f"❌ [DEBUG] hrcalc error: {e}")
+                    raw_bpm = rates[-1] if rates else 0 
             else:
-                rates.pop(0)
-                rates.append(float(raw_bpm))
+                # Simulated value derived from IR amplitude variation for fallback/testing
+                if ir_value is not None and not calc_hr_and_spo2:
+                    raw_bpm = 60.0 + (int(ir_value) % 30)
+
+            if raw_bpm > 0:
+                if len(rates) < RATE_SIZE:
+                    rates.append(float(raw_bpm))
+                else:
+                    rates.pop(0)
+                    rates.append(float(raw_bpm))
             heart_readings += 1
             
             # Read Temperature

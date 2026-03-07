@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY hardware_controller.py .
 COPY max30102.py .
 COPY mlx90614.py .
+COPY hrcalc.py .
 
 # Default environment (override in docker-compose)
 ENV BACKEND_URL=http://localhost:3001

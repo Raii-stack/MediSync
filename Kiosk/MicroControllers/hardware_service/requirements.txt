@@ -7,3 +7,4 @@ requests
 gpiozero==2.*
 RPi.GPIO
 smbus2
+numpy
