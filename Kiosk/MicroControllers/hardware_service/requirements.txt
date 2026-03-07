@@ -1,0 +1,9 @@
+# Socket.IO async client (AIOHTTP transport support)
+python-socketio[client]==5.*
+aiohttp==3.*
+requests
+
+# Raspberry Pi GPIO & I2C Handlers
+gpiozero==2.*
+RPi.GPIO
+smbus2

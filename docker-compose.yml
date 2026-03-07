@@ -43,13 +43,14 @@ services:
       - VITE_API_URL=${VITE_API_URL:-http://localhost:3001}
       - VITE_ADMIN_PASSWORD=${VITE_ADMIN_PASSWORD}
 
-  led-status:
-    image: ry4nj/medisync-led-status:latest
-    container_name: medisync-led-status
+  hardware-service:
+    image: ry4nj/medisync-hardware:latest
+    container_name: medisync-hardware
     network_mode: host # shares network with backend (localhost:3001)
     privileged: true # required for RPi GPIO access
     devices:
       - "/dev/gpiochip0:/dev/gpiochip0"
+      - "/dev/i2c-1:/dev/i2c-1" # required for MAX30102
     environment:
       - BACKEND_URL=http://localhost:3001
       # Vitals LED (R + G channels)
