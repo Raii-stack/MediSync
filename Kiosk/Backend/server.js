@@ -324,24 +324,27 @@ function resetVitalsSession() {
 }
 
 function completeVitalsSession() {
+  // With split sensors (BPM from Pi, temp from ESP32), either may be empty
   if (
-    vitalsSession.bpmSamples.length === 0 ||
+    vitalsSession.bpmSamples.length === 0 &&
     vitalsSession.tempSamples.length === 0
   ) {
-    console.log("[VITALS] No samples collected, not emitting completion event");
+    console.log("[VITALS] No samples collected at all, not emitting completion event");
     resetVitalsSession();
     return;
   }
 
-  const avgBpm =
-    vitalsSession.bpmSamples.reduce((a, b) => a + b, 0) /
-    vitalsSession.bpmSamples.length;
-  const avgTemp =
-    vitalsSession.tempSamples.reduce((a, b) => a + b, 0) /
-    vitalsSession.tempSamples.length;
+  const avgBpm = vitalsSession.bpmSamples.length > 0
+    ? vitalsSession.bpmSamples.reduce((a, b) => a + b, 0) /
+      vitalsSession.bpmSamples.length
+    : 0;
+  const avgTemp = vitalsSession.tempSamples.length > 0
+    ? vitalsSession.tempSamples.reduce((a, b) => a + b, 0) /
+      vitalsSession.tempSamples.length
+    : 0;
 
   console.log(
-    `[VITALS] ✅ Scan complete - Avg BPM: ${avgBpm.toFixed(1)}, Avg Temp: ${avgTemp.toFixed(1)}`,
+    `[VITALS] ✅ Scan complete - Avg BPM: ${avgBpm.toFixed(1)} (${vitalsSession.bpmSamples.length} samples), Avg Temp: ${avgTemp.toFixed(1)} (${vitalsSession.tempSamples.length} samples)`,
   );
 
   io.emit("vitals-complete", {
@@ -515,16 +518,16 @@ hardware.onData((event) => {
 
   if (event.type === "vitals") {
     console.log("[DEBUG] hardware vitals event:", event.data);
-    console.log("[DEBUG] Connected clients count:", io.engine.clientsCount);
 
     // Track samples for averaging
     const bpmValue = parseFloat(event.data.bpm);
     const tempValue = parseFloat(event.data.temp);
 
-    if (!isNaN(bpmValue)) {
+    // Only push non-zero BPM (ESP32 sends bpm=0 for temp-only updates)
+    if (!isNaN(bpmValue) && bpmValue > 0) {
       vitalsSession.bpmSamples.push(bpmValue);
     }
-    if (!isNaN(tempValue)) {
+    if (!isNaN(tempValue) && tempValue > 0) {
       vitalsSession.tempSamples.push(tempValue);
     }
     vitalsSession.sampleCount++;
@@ -540,9 +543,21 @@ hardware.onData((event) => {
       // Simulation fallback: calculate based on sample count (5 samples total)
       progress = Math.min(100, vitalsSession.sampleCount * 20);
     }
+
+    // For the emitted BPM, use the latest actual BPM (not 0 from temp-only ESP32 events)
+    const latestBpm = (bpmValue > 0) ? bpmValue
+      : (vitalsSession.bpmSamples.length > 0
+        ? vitalsSession.bpmSamples[vitalsSession.bpmSamples.length - 1]
+        : 0);
+    // For temp, use the latest reading
+    const latestTemp = (tempValue > 0) ? tempValue
+      : (vitalsSession.tempSamples.length > 0
+        ? vitalsSession.tempSamples[vitalsSession.tempSamples.length - 1]
+        : 0);
+
     io.emit("vitals-progress", {
-      bpm: bpmValue,
-      temp: tempValue,
+      bpm: latestBpm,
+      temp: latestTemp,
       progress: progress,
     });
 

@@ -58,7 +58,7 @@ export function VitalSignsScreen() {
     const maxDurationTimer = setTimeout(async () => {
       if (hasNavigatedRef.current) return;
 
-      console.log("⏱️ Vitals max duration reached (1:00). Stopping scan and proceeding to symptoms.");
+      console.log("⏱️ Vitals max duration reached. Stopping scan and proceeding to symptoms.");
       setStatusText("Time limit reached. Proceeding...");
       hasNavigatedRef.current = true;
       isScanActiveRef.current = false;
@@ -76,22 +76,26 @@ export function VitalSignsScreen() {
           )
         : temperature;
 
-      if (avgBpm !== null && avgTemp !== null) {
-        setHeartRate(avgBpm);
-        setTemperature(avgTemp);
-        setVitalSigns({
-          heartRate: avgBpm,
-          temperature: avgTemp,
-          oxygenLevel: 98,
-        });
-        sessionStorage.setItem(
-          "vitals",
-          JSON.stringify({
-            bpm: avgBpm,
-            temp: avgTemp,
-          }),
-        );
-      }
+      // Always store whatever vitals we have — use 0 as fallback for missing
+      const finalBpm = avgBpm ?? 0;
+      const finalTemp = avgTemp ?? 0;
+
+      console.log(`📊 Timeout vitals: BPM=${finalBpm} (${bpmSamples.length} samples), Temp=${finalTemp} (${tempSamples.length} samples)`);
+
+      setHeartRate(finalBpm);
+      setTemperature(finalTemp);
+      setVitalSigns({
+        heartRate: finalBpm,
+        temperature: finalTemp,
+        oxygenLevel: 98,
+      });
+      sessionStorage.setItem(
+        "vitals",
+        JSON.stringify({
+          bpm: finalBpm,
+          temp: finalTemp,
+        }),
+      );
 
       try {
         await axios.post(`${API_BASE}/api/scan/stop`);
@@ -173,9 +177,11 @@ export function VitalSignsScreen() {
 
       console.log("✅ Vitals scan complete:", data);
 
-      // Set final averaged values
-      const finalBpm = Math.round(data.avg_bpm);
-      const finalTemp = parseFloat(data.temp.toFixed(1));
+      // Use 0 as fallback for missing values
+      const finalBpm = data.avg_bpm ? Math.round(data.avg_bpm) : (heartRate ?? 0);
+      const finalTemp = data.temp ? parseFloat(data.temp.toFixed(1)) : (temperature ?? 0);
+
+      console.log(`📊 Final vitals: BPM=${finalBpm}, Temp=${finalTemp}`);
 
       setHeartRate(finalBpm);
       setTemperature(finalTemp);

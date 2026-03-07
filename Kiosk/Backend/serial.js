@@ -75,6 +75,22 @@ function attachParserListener() {
         return;
       }
 
+      // ESP32 sends temperature-only updates (heart rate is now on the Pi)
+      if (parsed.event === "vitals_temp") {
+        if (!isScanning) return;
+        console.log(
+          `[HARDWARE] 🌡️  ESP32 Temp: ${parsed.temperature}°C`,
+        );
+        globalCallback({
+          type: "vitals",
+          data: {
+            temp: parsed.temperature,
+            bpm: 0,  // BPM comes from the Pi, not ESP32
+          },
+        });
+        return;
+      }
+
       if (parsed.event === "vitals_data") {
         if (!isScanning) return;
         console.log(
