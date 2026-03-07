@@ -154,7 +154,7 @@ waiting_prompt_sent = False
 finger_removed_sent = False
 finger_placed_at = 0.0   # timestamp when finger was first detected this scan
 
-SCAN_DURATION = 40.0     # seconds — timer starts from when finger is placed
+SCAN_DURATION = 60.0     # seconds — timer starts from when finger is placed
 RATE_SIZE = 8
 rates = []
 temps = []               # Track temperature readings

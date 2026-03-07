@@ -20,26 +20,13 @@ export function IdleTimeoutProvider({
   const [remainingTime, setRemainingTime] = useState(Math.ceil(warningMs / 1000));
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Pages where idle timeout should NOT apply
   const excludedPaths = ["/", "/admin", "/vitals"];
   const isExcluded = excludedPaths.includes(location.pathname);
 
-  // Stop tracking if on an excluded path
-  useEffect(() => {
-    if (isExcluded) {
-      clearAllTimers();
-      setShowWarning(false);
-    } else {
-      resetTimeout();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, isExcluded]);
-
   const clearAllTimers = () => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
   };
 
   const handleTimeout = () => {
@@ -54,27 +41,28 @@ export function IdleTimeoutProvider({
     // Attempt backend session end call (optional)
     fetch("http://localhost:3001/api/session/end", { method: "POST" }).catch(() => {});
     
-    navigate("/");
+    navigate("/", { replace: true });
   };
 
-  // Trigger timeout when remainingTime hits 0
+  // 1) Countdown the remaining time while the warning is shown
+  useEffect(() => {
+    if (showWarning && remainingTime > 0) {
+      const timer = setTimeout(() => setRemainingTime((prev) => prev - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [showWarning, remainingTime]);
+
+  // 2) Trigger timeout when remainingTime hits 0
   useEffect(() => {
     if (showWarning && remainingTime <= 0) {
       handleTimeout();
     }
-  }, [remainingTime, showWarning]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [showWarning, remainingTime]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleIdleWarning = () => {
     if (isExcluded) return;
     setShowWarning(true);
     setRemainingTime(Math.ceil(warningMs / 1000));
-
-    // Start a countdown interval for the modal
-    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-    
-    countdownIntervalRef.current = setInterval(() => {
-      setRemainingTime((prev) => prev - 1);
-    }, 1000);
   };
 
   const resetTimeout = () => {

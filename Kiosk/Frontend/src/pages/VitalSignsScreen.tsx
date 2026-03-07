@@ -11,7 +11,7 @@ import { API_BASE_URL } from "../config/api";
 import { SensorPromptModal } from "../components/SensorPromptModal";
 
 const API_BASE = API_BASE_URL;
-const MAX_SCAN_DURATION_MS = 45_000; // 40s scan + 5s grace period
+const MAX_SCAN_DURATION_MS = 60_000; // 60s scan
 
 export function VitalSignsScreen() {
   const navigate = useNavigate();
