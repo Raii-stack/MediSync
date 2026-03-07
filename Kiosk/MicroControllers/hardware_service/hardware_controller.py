@@ -163,12 +163,21 @@ def heartbeat_loop():
     
     sensor = None
     if MAX30102:
-        try:
-            sensor = MAX30102()
-            log.info("MAX30102 initialized successfully.")
-        except Exception as e:
-            log.error(f"Failed to init MAX30102: {e}")
-            sensor = None
+        MAX_RETRIES = 5
+        RETRY_DELAY = 3  # seconds
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                sensor = MAX30102()
+                log.info("MAX30102 initialized successfully.")
+                break
+            except Exception as e:
+                log.warning(f"MAX30102 init attempt {attempt}/{MAX_RETRIES} failed: {e}")
+                if attempt < MAX_RETRIES:
+                    log.info(f"Retrying in {RETRY_DELAY}s...")
+                    time.sleep(RETRY_DELAY)
+                else:
+                    log.error("MAX30102 could not be initialized after all retries. Falling back to simulation.")
+                    sensor = None
     else:
         log.warning("max30102 module missing. Running in simulation.")
 
