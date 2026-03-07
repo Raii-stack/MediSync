@@ -401,6 +401,31 @@ io.on("connection", (socket) => {
     // Tell the LED service (and any other listeners) to go back to idle
     io.emit("system-reset");
   });
+
+  // Listeners for Respiratory Pi Heartbeat Sensor Service
+  socket.on("pi-sensor-status", (data) => {
+    io.emit("sensor-status", data);
+  });
+
+  socket.on("pi-vitals-data", (data) => {
+    const currentTemp = vitalsSession.tempSamples.length > 0
+      ? vitalsSession.tempSamples[vitalsSession.tempSamples.length - 1]
+      : 0;
+
+    if (data.bpm > 0) {
+      vitalsSession.bpmSamples.push(data.bpm);
+    }
+
+    io.emit("vitals-progress", {
+      bpm: data.bpm,
+      temp: currentTemp,
+      progress: data.progress
+    });
+
+    if (data.progress >= 100) {
+      completeVitalsSession();
+    }
+  });
 });
 
 // --- 1. HARDWARE STREAMING ---
@@ -1281,6 +1306,8 @@ app.post("/api/scan/start", (req, res) => {
 
   // Notify LED service: session active → red
   io.emit("rfid-led-session");
+  // Notify Pi Heartbeat Service to start scanning
+  io.emit("start-vitals-scan");
 
   res.json({ success: true, message: "Scan started" });
 });
@@ -1289,6 +1316,9 @@ app.post("/api/scan/start", (req, res) => {
 app.post("/api/scan/stop", (req, res) => {
   console.log("🟠 STOP_SCAN received");
   hardware.stopScan();
+
+  // Notify Pi Heartbeat Service to stop scanning
+  io.emit("stop-vitals-scan");
 
   // Complete the vitals session with averaged data
   if (vitalsSession.isScanning) {

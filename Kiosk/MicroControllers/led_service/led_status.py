@@ -58,12 +58,16 @@ RFID_B_PIN       = int(os.environ.get("RFID_LED_B_PIN",   25))
 # ── GPIO Setup ────────────────────────────────────────────────────────────────
 Device.pin_factory = RPiGPIOFactory()
 
-vitals_r = PWMLED(VITALS_R_PIN)
-vitals_g = PWMLED(VITALS_G_PIN)
+# Common Anode LEDs are HIGH=OFF, LOW=ON. Set active_high=False so 1.0=ON, 0.0=OFF in code.
+IS_COMMON_ANODE = os.environ.get("LED_COMMON_ANODE", "true").lower() == "true"
+active_high = not IS_COMMON_ANODE
 
-rfid_r   = PWMLED(RFID_R_PIN)
-rfid_g   = PWMLED(RFID_G_PIN)
-rfid_b   = PWMLED(RFID_B_PIN)
+vitals_r = PWMLED(VITALS_R_PIN, active_high=active_high)
+vitals_g = PWMLED(VITALS_G_PIN, active_high=active_high)
+
+rfid_r   = PWMLED(RFID_R_PIN, active_high=active_high)
+rfid_g   = PWMLED(RFID_G_PIN, active_high=active_high)
+rfid_b   = PWMLED(RFID_B_PIN, active_high=active_high)
 
 
 def set_vitals_color(r: float, g: float):

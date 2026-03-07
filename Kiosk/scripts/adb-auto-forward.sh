@@ -16,19 +16,28 @@ adb start-server
 while true; do
     # Check if a device is connected and authorized
     if adb devices | grep -q "\<device\>"; then
-        # Check if backend port is already forwarded by looking for tcp:3001 in reverse list
-        if ! adb reverse --list | grep -q "tcp:3001"; then
+        # Check if backend or frontend ports are already forwarded
+        if ! adb reverse --list | grep -q "tcp:3001" || ! adb reverse --list | grep -q "tcp:8080"; then
             echo "[$(date)] Tablet detected. Setting up port forwarding..."
 
             # Forward Backend: tablet's localhost:3001 -> Pi's localhost:3001
-            # (Frontend is now served on port 8080 directly, no reverse forwarding needed)
             adb reverse tcp:3001 tcp:3001
             STATUS_3001=$?
+
+            # Forward Frontend: tablet's localhost:8080 -> Pi's localhost:8080
+            adb reverse tcp:8080 tcp:8080
+            STATUS_8080=$?
 
             if [ $STATUS_3001 -eq 0 ]; then
                 echo "[$(date)] ✅ Backend port successfully forwarded (3001→3001)."
             else
                 echo "[$(date)] ❌ Failed to forward backend port (exit: $STATUS_3001)."
+            fi
+
+            if [ $STATUS_8080 -eq 0 ]; then
+                echo "[$(date)] ✅ Frontend port successfully forwarded (8080→8080)."
+            else
+                echo "[$(date)] ❌ Failed to forward frontend port (exit: $STATUS_8080)."
             fi
         fi
     else

@@ -1,7 +1,5 @@
 #include <Wire.h>
 #include <Adafruit_MLX90614.h>
-#include <MAX30105.h>
-#include <heartRate.h>
 #include <ArduinoJson.h>
 #include <SPI.h>
 #include <MFRC522.h>
@@ -13,8 +11,6 @@
 // I2C Buses
 #define THERMAL_SDA 21
 #define THERMAL_SCL 22
-#define HEART_SDA 4
-#define HEART_SCL 13
 
 // SPI & RFID
 #define RFID_SS_PIN 5
@@ -51,17 +47,10 @@ unsigned long lastRfidRead = 0;
 
 // ==================== GLOBAL OBJECTS ====================
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
-MAX30105 particleSensor;
 TwoWire I2C_Thermal = TwoWire(0);
-TwoWire I2C_Heart = TwoWire(1);
 
 // ==================== VARIABLES ====================
-const byte RATE_SIZE = 3;  // 3-sample rolling avg: faster convergence, ±5 BPM tolerance
-byte rates[RATE_SIZE];
-byte rateSpot = 0;
-long lastBeat = 0;
-float beatsPerMinute;
-int beatAvg;
+
 
 enum ScanState
 {
@@ -128,21 +117,7 @@ void setup()
     Serial2.println("OK: Thermal Sensor Ready");
   }
 
-  // Heart Sensor Init
-  // NOTE: Pulse amplitude raised to 0x3F (~12.5 mA) for better signal-to-noise ratio.
-  // If finger detection feels too sensitive or IR values saturate, lower to 0x1F.
-  I2C_Heart.begin(HEART_SDA, HEART_SCL, 400000);
-  if (!particleSensor.begin(I2C_Heart, I2C_SPEED_FAST))
-  {
-    Serial2.println("ERROR: Heart Sensor Missing");
-  }
-  else
-  {
-    Serial2.println("OK: Heart Sensor Ready");
-    particleSensor.setup(60, 4, 2, 100, 411, 4096);
-    particleSensor.setPulseAmplitudeRed(0x3F); // Raised from 0x0A for improved accuracy
-    particleSensor.setPulseAmplitudeGreen(0);
-  }
+
 
   playSuccessTone();
 }
@@ -161,12 +136,6 @@ void loop()
   if (currentState == READING_VITALS)
   {
     readVitalSigns();
-  }
-  else
-  {
-    particleSensor.check();
-    while (particleSensor.available())
-      particleSensor.nextSample();
   }
 }
 
@@ -343,142 +312,31 @@ void unlockSolenoid()
 // ==================== VITALS ====================
 void readVitalSigns()
 {
-  static unsigned long fingerRemovedTime = 0;
-  static bool fingerDetected = false;
-  static bool waitingPromptSent = false;
-  static bool fingerRemovedSent = false;
-  static bool firstReading = true;
-  static int readingCount = 0;
-  static float tempSum = 0;
-  static int heartReadings = 0;
   static unsigned long lastStreamTime = 0;
   static bool initialized = false;
 
   if (!initialized)
   {
-    fingerDetected = false;
-    fingerRemovedTime = 0;
-    readingCount = 0;
-    tempSum = 0;
-    heartReadings = 0;
+    lastStreamTime = 0;
     initialized = true;
-    firstReading = true;
-    beatAvg = 0;
-    rateSpot = 0;
-    particleSensor.clearFIFO();
-    waitingPromptSent = false;
-    fingerRemovedSent = false;
   }
 
-  long irValue = particleSensor.getIR();
-  if (irValue == 0)
-  {
-    particleSensor.check();
-    while (particleSensor.available())
-      irValue = particleSensor.getIR();
-  }
-
-  if (!fingerDetected)
-  {
-    if (!waitingPromptSent)
-    {
-      sendJson("status", "waiting_for_finger", 0, 0);
-      waitingPromptSent = true;
-    }
-
-    if (irValue > 50000)
-    {
-      fingerDetected = true;
-      sendJson("vitals_progress", 0, 0, 0.05);
-    }
-    return;
-  }
-
-  if (irValue < 50000)
-  {
-    if (fingerRemovedTime == 0)
-      fingerRemovedTime = millis();
-
-    // Notify backend once that the finger was removed mid-scan
-    if (!fingerRemovedSent)
-    {
-      sendJson("status", "finger_removed", 0, 0);
-      fingerRemovedSent = true;
-    }
-
-    if (millis() - fingerRemovedTime > 2000)
-    {
-      fingerDetected = false;
-      fingerRemovedTime = 0;
-      readingCount = 0;
-      tempSum = 0;
-      heartReadings = 0;
-      firstReading = true;
-      beatAvg = 0;
-      rateSpot = 0;
-      lastStreamTime = 0;
-      particleSensor.clearFIFO();
-      waitingPromptSent = false;
-      fingerRemovedSent = false;
-    }
-    return;
-  }
-  fingerRemovedTime = 0;
-  fingerRemovedSent = false; // Reset when finger is back
-  waitingPromptSent = false;
-
-  float tempC = mlx.readObjectTempC();
-  if (tempC > 20 && tempC < 50)
-  {
-    tempSum += tempC;
-    readingCount++;
-  }
-
-  if (checkForBeat(irValue))
-  {
-    long delta = millis() - lastBeat;
-    lastBeat = millis();
-    beatsPerMinute = 60 / (delta / 1000.0);
-
-    if (beatsPerMinute > 40 && beatsPerMinute < 180)
-    {
-      if (firstReading)
-      {
-        for (byte i = 0; i < RATE_SIZE; i++)
-          rates[i] = (byte)beatsPerMinute;
-        firstReading = false;
-      }
-      else
-      {
-        rates[rateSpot++] = (byte)beatsPerMinute;
-        rateSpot %= RATE_SIZE;
-      }
-      beatAvg = 0;
-      for (byte x = 0; x < RATE_SIZE; x++)
-        beatAvg += rates[x];
-      beatAvg /= RATE_SIZE;
-      heartReadings++;
-
-      float prog = min((float)heartReadings / 5.0f, 1.0f);
-      sendJson("vitals_progress", 0, beatAvg, prog);
-    }
-  }
-
+  // ESP32 now only reads temperature. Heart rate is handled by Raspberry Pi.
   if (millis() - lastStreamTime >= 1000)
   {
     lastStreamTime = millis();
-    float curTemp = readingCount > 0 ? tempSum / readingCount : 0;
-    float prog = min((float)heartReadings / 5.0f, 1.0f);
-    if (beatAvg > 0)
-      sendJson("vitals_progress", curTemp, beatAvg, prog);
-  }
-
-  if (heartReadings >= 3)  // 3 beats required: ~2.5s at 70 BPM (was 5 = ~4s)
-  {
-    float avgTemp = readingCount > 0 ? tempSum / readingCount : 0;
-    sendJson("vitals_data", avgTemp, beatAvg, 1.0);
-    finishVitals(true);
-    initialized = false;
+    float tempC = mlx.readObjectTempC();
+    
+    // Only send valid readings
+    if (tempC > 20 && tempC < 50)
+    {
+      StaticJsonDocument<200> doc;
+      doc["event"] = "vitals_temp";
+      doc["temperature"] = ((int)(tempC * 10)) / 10.0;
+      String out;
+      serializeJson(doc, out);
+      Serial2.println(out);
+    }
   }
 }
 
